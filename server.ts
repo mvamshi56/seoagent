@@ -113,15 +113,11 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-   const PORT = parseInt(process.env.PORT || '10000', 10);
+const PORT = parseInt(process.env.PORT || '10000', 10);
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
     });
-    });
-  }
-});
-  });
+
   } catch (error) {
     console.error("FATAL: Failed to start server:", error);
     process.exit(1);
@@ -129,3 +125,4 @@ async function startServer() {
 }
 
 startServer();
+ 
