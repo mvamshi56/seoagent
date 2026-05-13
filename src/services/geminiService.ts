@@ -10,7 +10,7 @@ export async function generateSEOInsights(stats: AuditStats, pages: SEOPage[]) {
 
   // Sample data to avoid hitting context limits for very large audits
   const topIssues = pages
-    .flatMap(p => p.issues)
+    .flatMap(p => p.issues || [])
     .reduce((acc, issue) => {
       acc[issue.message] = (acc[issue.message] || 0) + 1;
       return acc;
@@ -36,14 +36,14 @@ export async function generateSEOInsights(stats: AuditStats, pages: SEOPage[]) {
     ${sortedIssues.map(([msg, count]) => `- ${msg} (found on ${count} pages)`).join("\n")}
     
     Common Keywords Detected:
-    ${pages.slice(0, 5).map(p => `- ${p.url}: ${p.keywords.join(", ")}`).join("\n")}
+    ${pages.slice(0, 5).map(p => `- ${p.url}: ${(p.keywords || []).join(", ")}`).join("\n")}
     
     Format your response as a clear SEO strategy roadmap. Be professional, technical yet accessible.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.0-flash",
       contents: prompt,
       config: {
         systemInstruction: "You are an expert SEO Strategist at a top digital agency. You provide high-impact, data-driven SEO advice."
@@ -62,7 +62,7 @@ export async function chatAboutSEO(query: string, context: SEOPage[]) {
     return "Gemini API key is not configured.";
   }
 
-  const contextText = context.slice(0, 15).map(p => `URL: ${p.url}, Score: ${p.score}, Issues: ${p.issues.map((i: any) => i.message).join(', ')}`).join('\n');
+  const contextText = context.slice(0, 15).map(p => `URL: ${p.url}, Score: ${p.score}, Issues: ${(p.issues || []).map((i: any) => i.message).join(', ')}`).join('\n');
   
   const prompt = `
     You are an AI SEO Assistant. Use the following audit context to answer the user's question concisely.
@@ -74,7 +74,7 @@ export async function chatAboutSEO(query: string, context: SEOPage[]) {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.0-flash",
       contents: prompt,
     });
 

@@ -1,3 +1,4 @@
+import fs from "fs";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -9,17 +10,33 @@ import * as ai from "./src/services/aiProviderService.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+console.log("Starting server process...");
+
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
+  try {
+    const app = express();
+    const PORT = 3000;
 
-  app.use(express.json());
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Initialize DB
-  await db.initDB();
+    app.use((req, res, next) => {
+      next();
+    });
 
-  // API Routes
-  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+    console.log("Initializing database...");
+    // Initialize DB
+    await db.initDB();
+    console.log("Database initialized successfully.");
+
+    // API Routes
+    console.log("Registering API routes...");
+    app.post("/api/log", (req, res) => {
+      console.error("FRONTEND ERROR:", req.body);
+      fs.appendFileSync("frontend_errors.log", JSON.stringify(req.body) + "\n");
+      res.json({ ok: true });
+    });
+    app.get("/api/health", (req, res) => res.json({ status: "ok" }));
   
   app.post("/api/ai/insights", async (req, res) => {
     const { provider, stats, pages, keys } = req.body;
@@ -39,6 +56,17 @@ async function startServer() {
       res.json({ response });
     } catch (error: any) {
       console.error("AI Chat Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/ai/geo", async (req, res) => {
+    const { provider, query, pages, keys } = req.body;
+    try {
+      const response = await ai.geoAudit(provider, query, pages, keys || {});
+      res.json({ response });
+    } catch (error: any) {
+      console.error("AI GEO Error:", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -71,11 +99,13 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    console.log("Initializing Vite middleware...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
+    console.log("Vite middleware initialized.");
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
@@ -85,8 +115,13 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[READY] SEO Sage Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
+  } catch (error) {
+    console.error("FATAL: Failed to start server:", error);
+    process.exit(1);
+  }
 }
 
 startServer();
