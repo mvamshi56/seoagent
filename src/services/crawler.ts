@@ -234,20 +234,11 @@ export async function audit(startUrl: string, config: AuditConfig) {
       }
 
       // Fallback to Playwright if fetch failed or returned invalid content
-      // OR always use Playwright for the root page to ensure full SPA/Bot handling
-      const urlKey = url
-        .replace(/\/$/, "")
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .toLowerCase();
-      const startKey = startUrlNormalized
-        .replace(/\/$/, "")
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .toLowerCase();
-      const isRoot = urlKey === startKey;
-
-      if (!htmlContent || isRoot) {
-        // Wait if too many Playwright instances are running to prevent memory crashes
-        while (activePlaywrights >= 6) {
+      // On constrained environments like Render Free tier, we only want to use Playwright when absolutely necessary
+      // so we rely on the fetch htmlContent check. If it's a tiny SPA, it will likely be caught by the length checks.
+      if (!htmlContent || htmlContent.length < 1000) {
+        // Limit active Playwright pages to 1 or 2 max to prevent 512MB RAM limits being exceeded on Render
+        while (activePlaywrights >= 2) {
            await new Promise((r) => setTimeout(r, 200));
         }
         activePlaywrights++;
@@ -295,11 +286,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
           const page = await context.newPage();
 
           // Optimization: Block heavy resources
-          await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,webm,ogg,mp3,wav,flac,aac,woff,woff2,ttf,otf,eot}', route => route.abort());
-          // Block CSS unless very small or root
-          if (!isRoot) {
-            await page.route('**/*.css', route => route.abort());
-          }
+          await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,webm,ogg,mp3,wav,flac,aac,woff,woff2,ttf,otf,eot,css}', route => route.abort());
 
           try {
             let resp = await page
@@ -462,7 +449,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
   };
 
   try {
-    const workerCount = 12; // Further increased concurrency
+    const workerCount = process.env.RENDER || process.env.NODE_ENV === 'production' ? 4 : 8; // Reduce concurrency to perform better on limited RAM hosting like Render Free
     const workers = Array.from({ length: workerCount }, () => runWorker());
     await Promise.all(workers);
   } catch (error) {
