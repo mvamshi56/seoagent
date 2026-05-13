@@ -235,125 +235,125 @@ export async function audit(startUrl: string, config: AuditConfig) {
 
       // Fallback to Playwright if fetch failed or returned invalid content
       // On constrained environments like Render Free tier, we only want to use Playwright when absolutely necessary
-      // so we rely on the fetch htmlContent check. If it's a tiny SPA, it will likely be caught by the length checks.
       if (!htmlContent || htmlContent.length < 1000) {
-        // Limit active Playwright pages to 1 or 2 max to prevent 512MB RAM limits being exceeded on Render
-        while (activePlaywrights >= 2) {
-           await new Promise((r) => setTimeout(r, 200));
-        }
-        activePlaywrights++;
-
-        try {
-          if (!browser) {
-            while (isLaunchingBrowser) {
-              await new Promise((r) => setTimeout(r, 100));
-            }
-            if (!browser) {
-              isLaunchingBrowser = true;
-              try {
-                browser = await chromium.launch({
-                  headless: true,
-                  args: [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-web-security",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-blink-features=AutomationControlled",
-                  ],
-                });
-              } catch (launchErr: any) {
-                console.error(
-                  "Playwright failed to launch. Attempting automated recovery...",
-                  launchErr.message,
-                );
-              } finally {
-                isLaunchingBrowser = false;
-              }
-            }
+        const isRender = process.env.RENDER || process.env.NODE_ENV === 'production';
+        
+        if (isRender) {
+          // Playwright consumes too much RAM for Render Free Tier constraints
+          console.warn(`Skipping Playwright fallback for ${url} in production to prevent OOM.`);
+        } else {
+          // Local environment: Limit active Playwright instances
+          while (activePlaywrights >= 2) {
+             await new Promise((r) => setTimeout(r, 200));
           }
-
-        if (browser) {
-          const context = await browser.newContext({
-            userAgent:
-              userAgents[Math.floor(Math.random() * userAgents.length)],
-            viewport: { width: 1280, height: 800 },
-            extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-            bypassCSP: true,
-            ignoreHTTPSErrors: true,
-          });
-
-          const page = await context.newPage();
-
-          // Optimization: Block heavy resources
-          await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,webm,ogg,mp3,wav,flac,aac,woff,woff2,ttf,otf,eot,css}', route => route.abort());
+          activePlaywrights++;
 
           try {
-            let resp = await page
-              .goto(url, { waitUntil: "domcontentloaded", timeout: 15000 })
-              .catch(() => null);
-            
-            // if domcontentloaded times out, we still proceed to grab what is there.
-
-            // Cloudflare Bypass Attempt
-            const title = await page.title().catch(() => "");
-            if (
-              title.toLowerCase().includes("just a moment") ||
-              title.toLowerCase().includes("cloudflare") ||
-              title.toLowerCase().includes("attention required")
-            ) {
-              db.updateStatus(
-                true,
-                progress,
-                `Bypassing Cloudflare Challenge: ${url}`,
-              ).catch(() => {});
-              // Wait for challenge to execute
-              await page.waitForTimeout(5000);
-              // Random mouse movements sometimes help trigger implicit Turnstile validations
-              await page.mouse
-                .move(Math.random() * 500, Math.random() * 500)
-                .catch(() => {});
-              await page.waitForTimeout(500);
-              await page.mouse
-                .click(Math.random() * 500, Math.random() * 500)
-                .catch(() => {});
-              await page.waitForTimeout(3000);
-            } else {
-              // SPA needs a brief moment to render content
-              await page.waitForTimeout(500);
+            if (!browser) {
+              while (isLaunchingBrowser) {
+                await new Promise((r) => setTimeout(r, 100));
+              }
+              if (!browser) {
+                isLaunchingBrowser = true;
+                try {
+                  browser = await chromium.launch({
+                    headless: true,
+                    args: [
+                      "--no-sandbox",
+                      "--disable-setuid-sandbox",
+                      "--disable-dev-shm-usage",
+                      "--disable-web-security",
+                      "--disable-features=IsolateOrigins,site-per-process",
+                      "--disable-blink-features=AutomationControlled",
+                    ],
+                  });
+                } catch (launchErr: any) {
+                  console.error(
+                    "Playwright failed to launch. Attempting automated recovery...",
+                    launchErr.message,
+                  );
+                } finally {
+                  isLaunchingBrowser = false;
+                }
+              }
             }
 
-            // Try to scroll to trigger lazy loads
-            await page
-              .evaluate(() =>
-                window.scrollTo(0, document.body.scrollHeight / 2),
-              )
-              .catch(() => {});
-            await page.waitForTimeout(100);
-            await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+            if (browser) {
+              const context = await browser.newContext({
+                userAgent:
+                  userAgents[Math.floor(Math.random() * userAgents.length)],
+                viewport: { width: 1280, height: 800 },
+                extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+                bypassCSP: true,
+                ignoreHTTPSErrors: true,
+              });
 
-            finalUrl = page.url();
-            htmlContent = await page.content();
-            headersMap = (await resp?.allHeaders()) || {};
-            if (resp) {
-               headersMap["x-actual-status"] = resp.status().toString();
+              const page = await context.newPage();
+
+              // Optimization: Block heavy resources
+              await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,webm,ogg,mp3,wav,flac,aac,woff,woff2,ttf,otf,eot,css}', route => route.abort());
+
+              try {
+                let resp = await page
+                  .goto(url, { waitUntil: "domcontentloaded", timeout: 15000 })
+                  .catch(() => null);
+                
+                // Cloudflare Bypass Attempt
+                const title = await page.title().catch(() => "");
+                if (
+                  title.toLowerCase().includes("just a moment") ||
+                  title.toLowerCase().includes("cloudflare") ||
+                  title.toLowerCase().includes("attention required")
+                ) {
+                  db.updateStatus(
+                    true,
+                    progress,
+                    `Bypassing Cloudflare Challenge: ${url}`,
+                  ).catch(() => {});
+                  await page.waitForTimeout(5000);
+                  await page.mouse
+                    .move(Math.random() * 500, Math.random() * 500)
+                    .catch(() => {});
+                  await page.waitForTimeout(500);
+                  await page.mouse
+                    .click(Math.random() * 500, Math.random() * 500)
+                    .catch(() => {});
+                  await page.waitForTimeout(3000);
+                } else {
+                  await page.waitForTimeout(500);
+                }
+
+                await page
+                  .evaluate(() =>
+                    window.scrollTo(0, document.body.scrollHeight / 2),
+                  )
+                  .catch(() => {});
+                await page.waitForTimeout(100);
+                await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+
+                finalUrl = page.url();
+                htmlContent = await page.content();
+                headersMap = (await resp?.allHeaders()) || {};
+                if (resp) {
+                   headersMap["x-actual-status"] = resp.status().toString();
+                }
+
+                const finalUrlKey = finalUrl.replace(/\/$/, "").toLowerCase();
+                visited.add(finalUrlKey);
+                visited.add(finalUrlKey.replace(/^https?:\/\/(www\.)?/, ""));
+              } catch (pwErr: any) {
+                console.error(
+                  `Playwright fallback failed for ${url}:`,
+                  pwErr.message,
+                );
+              } finally {
+                await page?.close().catch(() => {});
+                await context?.close().catch(() => {});
+              }
             }
-
-            const finalUrlKey = finalUrl.replace(/\/$/, "").toLowerCase();
-            visited.add(finalUrlKey);
-            visited.add(finalUrlKey.replace(/^https?:\/\/(www\.)?/, ""));
-          } catch (pwErr: any) {
-            console.error(
-              `Playwright fallback failed for ${url}:`,
-              pwErr.message,
-            );
           } finally {
-            await page?.close().catch(() => {});
-            await context?.close().catch(() => {});
+            activePlaywrights--;
           }
-        }
-        } finally {
-          activePlaywrights--;
         }
       }
     } catch (e: any) {
@@ -386,38 +386,43 @@ export async function audit(startUrl: string, config: AuditConfig) {
         });
       }
     } else {
-      await db.savePage({
-        url,
-        title: "Crawl Restricted / Blocked",
-        description: `Content for ${url} could not be fully analyzed. This site may be using advanced bot protection or client-side rendering that requires more time.`,
-        statusCode: 0,
-        issues: [
-          {
-            type: "critical",
-            message: "Page content could not be retrieved (Blocked or Timeout)",
-            category: "technical",
+      console.log(`Saving fallback restricted page for ${url}`);
+      try {
+        await db.savePage({
+          url,
+          title: "Crawl Restricted / Blocked",
+          description: `Content for ${url} could not be fully analyzed. This site may be using advanced bot protection or client-side rendering that requires more time.`,
+          statusCode: 0,
+          issues: [
+            {
+              type: "critical",
+              message: "Page content could not be retrieved (Blocked or Timeout)",
+              category: "technical",
+            },
+          ],
+          links: { internal: [], external: [] },
+          loadTime: Date.now() - startTime,
+          score: 0,
+          keywords: [],
+          images: [],
+          headers: { h1: [], h2: [], h3: [], h4: [], h5: [], h6: [] },
+          ogTags: {},
+          structuredData: [],
+          canonical: "",
+          robots: "",
+          wordCount: 0,
+          textToCodeRatio: 0,
+          performance: { performanceScore: 0, fcp: 0, lcp: 0, cls: 0, tbt: 0 },
+          imageMetrics: {
+            total: 0,
+            missingAlt: 0,
+            missingAltPercent: 0,
+            genericAlt: 0,
           },
-        ],
-        links: { internal: [], external: [] },
-        loadTime: Date.now() - startTime,
-        score: 0,
-        keywords: [],
-        images: [],
-        headers: { h1: [], h2: [], h3: [], h4: [], h5: [], h6: [] },
-        ogTags: {},
-        structuredData: [],
-        canonical: "",
-        robots: "",
-        wordCount: 0,
-        textToCodeRatio: 0,
-        performance: { performanceScore: 0, fcp: 0, lcp: 0, cls: 0, tbt: 0 },
-        imageMetrics: {
-          total: 0,
-          missingAlt: 0,
-          missingAltPercent: 0,
-          genericAlt: 0,
-        },
-      } as any);
+        } as any);
+      } catch (saveErr: any) {
+        console.error(`Failed to save fallback page for ${url}:`, saveErr.message);
+      }
     }
   }
 
