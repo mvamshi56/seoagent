@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { generateGeminiInsights, chatWithGemini } from './services/clientAiService';
 import { 
@@ -80,6 +80,7 @@ import { ScoringModelPanel } from './components/ScoringModelPanel';
 import { SecurityRiskPanel } from './components/SecurityRiskPanel';
 import { AIBenchmarkPanel } from './components/AIBenchmarkPanel';
 import { AIUXAuditPanel } from './components/AIUXAuditPanel';
+import { EnterpriseAuditPanel } from './components/EnterpriseAuditPanel';
 import { SEOCheckPanel } from './components/SEOCheckPanel';
 import { Terminal } from 'lucide-react';
 import { SEOPage, AuditStats, AIInsightData } from './types/seo';
@@ -121,7 +122,7 @@ const getJitteredScore = (url: string, baseScore: number, index: number) => {
 
 export default function App() {
   console.log("App component rendering...");
-  const [activeTab, setActiveTab] = useState<'overview' | 'pages' | 'scoring-model' | 'security-risk' | 'ai-benchmark' | 'ai-ux-audit' | 'seo-check' | 'ai' | 'brief' | 'strategy' | 'experimentation' | 'market' | 'promptfoo'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'pages' | 'scoring-model' | 'security-risk' | 'ai-benchmark' | 'ai-ux-audit' | 'enterprise-audit' | 'seo-check' | 'ai' | 'brief' | 'strategy' | 'experimentation' | 'market' | 'promptfoo'>('overview');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [url, setUrl] = useState('');
   const [maxPages, setMaxPages] = useState(1000);
@@ -217,6 +218,54 @@ export default function App() {
       prev.includes(url) ? prev.filter(u => u !== url) : [...prev, url].slice(0, 2)
     );
   };
+
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const bottomScrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(1200);
+
+  // Synchronize horizontal scrolling between top helper scrollbar and main table container
+  useEffect(() => {
+    const topDiv = topScrollRef.current;
+    const bottomDiv = bottomScrollRef.current;
+    if (!topDiv || !bottomDiv) return;
+
+    let isSyncingTop = false;
+    let isSyncingBottom = false;
+
+    const handleTopScroll = () => {
+      if (isSyncingBottom) {
+        isSyncingBottom = false;
+        return;
+      }
+      isSyncingTop = true;
+      bottomDiv.scrollLeft = topDiv.scrollLeft;
+    };
+
+    const handleBottomScroll = () => {
+      if (isSyncingTop) {
+        isSyncingTop = false;
+        return;
+      }
+      isSyncingBottom = true;
+      topDiv.scrollLeft = bottomDiv.scrollLeft;
+    };
+
+    topDiv.addEventListener('scroll', handleTopScroll);
+    bottomDiv.addEventListener('scroll', handleBottomScroll);
+
+    return () => {
+      topDiv.removeEventListener('scroll', handleTopScroll);
+      bottomDiv.removeEventListener('scroll', handleBottomScroll);
+    };
+  }, [paginatedPages, activeTab]);
+
+  // Update table scrollWidth when paginated pages change or during window updates
+  useEffect(() => {
+    if (tableRef.current) {
+      setTableScrollWidth(tableRef.current.scrollWidth || 1200);
+    }
+  }, [paginatedPages, activeTab]);
 
   useEffect(() => {
     const checkInitialStatus = async () => {
@@ -537,6 +586,13 @@ export default function App() {
               onClick={() => setActiveTab('ai-ux-audit')} 
               icon={<Compass size={18} />} 
               label="AI UX Audit" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'enterprise-audit'} 
+              onClick={() => setActiveTab('enterprise-audit')} 
+              icon={<ShieldCheck size={18} />} 
+              label="Enterprise AI Audit" 
               collapsed={isSidebarCollapsed}
             />
             <SidebarLink 
@@ -1559,15 +1615,26 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="p-6 bg-slate-50/50 border-t border-slate-100">
+                <div className="p-6 bg-slate-50/50 border-t border-slate-100 flex flex-col">
+                  {/* Top Accessible Horizontal Scrollbar */}
+                  <div 
+                    ref={topScrollRef} 
+                    className="overflow-x-auto overflow-y-hidden custom-scrollbar border-x border-t border-slate-200 bg-slate-50 rounded-t-2xl shadow-xs"
+                    style={{ height: '12px' }}
+                    aria-hidden="true"
+                  >
+                    <div style={{ width: `${tableScrollWidth}px`, height: '1px' }} />
+                  </div>
+
                   <div 
                     id="audit-table-container"
-                    className="max-h-[750px] overflow-auto custom-scrollbar border border-slate-200 bg-white rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
+                    ref={bottomScrollRef}
+                    className="max-h-[500px] overflow-scroll custom-scrollbar border border-slate-200 bg-white rounded-b-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
                     tabIndex={0}
                     role="region"
                     aria-label="Audit data records table scrollable area"
                   >
-                    <table className="w-full text-left border-collapse min-w-[1200px]">
+                    <table ref={tableRef} className="w-full text-left border-collapse min-w-[1200px]">
                       <thead className="bg-[#f8fafc] text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap sticky top-0 z-20 border-b border-slate-200 shadow-sm">
                         <tr className="divide-x divide-slate-100">
                           <th className="px-6 py-6 w-16 text-center bg-slate-50">SEL</th>
@@ -1915,6 +1982,25 @@ export default function App() {
               >
                 <div className="max-w-7xl mx-auto">
                   <AIUXAuditPanel 
+                    pages={pages}
+                    selectedPageUrl={selectedPage?.url}
+                    onPageSelect={(page) => {
+                      setSelectedPage(page);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'enterprise-audit' && (
+              <motion.div
+                key="enterprise-audit"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <EnterpriseAuditPanel 
                     pages={pages}
                     selectedPageUrl={selectedPage?.url}
                     onPageSelect={(page) => {

@@ -82,6 +82,17 @@ async function startServer() {
     }
   });
 
+  app.post("/api/ai/enterprise-audit", async (req, res) => {
+    const { provider, url, title, description, bodyText, keys } = req.body;
+    try {
+      const result = await ai.checkEnterpriseAudit(provider, url, title, description, bodyText || "", keys || {});
+      res.json(JSON.parse(result));
+    } catch (error: any) {
+      console.error("AI Enterprise Audit Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/audit/start", async (req, res) => {
     const { url, depth, maxPages } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
