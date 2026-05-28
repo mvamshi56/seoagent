@@ -261,7 +261,8 @@ export function AIStrategyPanel({
   stats,
   pages,
   auditEndTime,
-  apiKeys
+  apiKeys,
+  agentProgress
 }: { 
   insight: AIInsightData | string | null;
   isGenerating: boolean;
@@ -275,6 +276,7 @@ export function AIStrategyPanel({
   pages: SEOPage[];
   auditEndTime: number | null;
   apiKeys?: any;
+  agentProgress?: string;
 }) {
   const [activeSubTab, setActiveSubTab] = useState<'strategy' | 'network' | 'entities' | 'geo'>('strategy');
   const [geoRatings, setGeoRatings] = useState<Record<string, number>>(() => {
@@ -481,6 +483,12 @@ export function AIStrategyPanel({
         }
       `;
 
+      const gKeyRaw = apiKeys.gemini || '';
+      const effectiveKeys = {
+        ...apiKeys,
+        gemini: (gKeyRaw === 'MY_GEMINI_API_KEY' || gKeyRaw === 'YOUR_GEMINI_API_KEY' ? process.env.GEMINI_API_KEY : gKeyRaw) || process.env.GEMINI_API_KEY || ''
+      };
+
       const res = await fetch('/api/ai/geo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -488,7 +496,7 @@ export function AIStrategyPanel({
           provider: aiProvider, 
           query: prompt,
           pages: pages.slice(0, 3), // Use less pages for GEO summary to save tokens
-          keys: apiKeys
+          keys: effectiveKeys
         })
       });
       
@@ -606,7 +614,7 @@ export function AIStrategyPanel({
           {isGenerating ? (
             <div className="flex items-center gap-3 px-4 py-1">
                <RefreshCw size={14} className="animate-spin text-blue-500" />
-               <span className="text-[11px] font-black text-blue-600 uppercase tracking-widest animate-pulse">Processing Nodes...</span>
+               <span className="text-[11px] font-black text-blue-600 uppercase tracking-widest animate-pulse">{agentProgress || 'Processing Nodes...'}</span>
             </div>
           ) : (
             <>
@@ -640,12 +648,17 @@ export function AIStrategyPanel({
                        <RefreshCw className="text-blue-500 animate-spin-reverse" size={32} />
                     </div>
                   </div>
+                  {agentProgress && (
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-slate-800 tracking-tight max-w-sm">{agentProgress}</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <React.Fragment>
                   {isData && typeof insight === 'object' ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                       <div className="lg:col-span-8 space-y-8">
+                    <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+                       <div className="xl:col-span-8 space-y-8">
                           <section className="bg-white border border-slate-200 p-8 md:p-12 rounded-[48px] shadow-sm relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-2 h-full bg-blue-600" />
                             <div className="flex items-center gap-3 mb-6">
@@ -708,7 +721,7 @@ export function AIStrategyPanel({
                           </div>
                        </div>
 
-                       <div className="lg:col-span-4 min-w-[260px]">
+                       <div className="xl:col-span-4 min-w-[260px]">
                           <section className="bg-slate-900 text-white p-4 md:p-5 rounded-[32px] h-full shadow-2xl relative overflow-hidden flex flex-col">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-[60px]" />
                             <div className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-8 flex items-center gap-2">
@@ -731,7 +744,7 @@ export function AIStrategyPanel({
                                   <div className="shrink-0 w-5 h-5 bg-blue-500/20 rounded-lg flex items-center justify-center text-blue-400">
                                      <span className="text-[10px] font-black">{i + 1}</span>
                                   </div>
-                                  <p className="text-xs font-semibold text-slate-300 leading-snug flex-1 break-words overflow-hidden">{f}</p>
+                                  <p className="text-xs font-semibold text-slate-300 leading-snug flex-1 min-w-0 break-words">{f}</p>
                                 </div>
                               ))}
                             </div>

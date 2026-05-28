@@ -45,6 +45,27 @@ export interface SEOPage {
   };
   geoScore?: number;
   geoAudit?: GEOResult;
+  bodyText?: string;
+  aiPlagiarism?: AIPlagiarismResult;
+}
+
+export interface AIPlagiarismResult {
+  aiPercentage: number;
+  uniquenessIndex: number;
+  clicheDensity: number;
+  detectedCliches: string[];
+  isHumanAuthentic: boolean;
+  verdict: string;
+  findings: string;
+  rewrites: { original: string; suggested: string; benefit: string }[];
+  detectedTone: string;
+  toneAnalysis: string;
+  toneScores: { dimension: string; score: number }[];
+  genericAiScore?: number;
+  hallucinatedFactsScore?: number;
+  noExpertReviewScore?: number;
+  massProducedSeoScore?: number;
+  riskFindings?: { riskName: string; score: number; explanation: string; solution: string }[];
 }
 
 export interface GEODimension {
@@ -182,6 +203,44 @@ export interface AIInsightData {
     schemaEffectiveness: string;
     actionableFixes: string[];
     detailedBreakdown?: GEOResult;
+  };
+  experimentationStrategy?: {
+    hypotheses: {
+      observation: string;
+      hypothesis: string;
+      metric: string;
+    }[];
+    abTests: {
+      testName: string;
+      description: string;
+      expectedImpact: string;
+      difficulty: string;
+    }[];
+  };
+  marketIntelligence?: {
+    targetAudienceGaps: string[];
+    campaignOpportunities: {
+      campaignName: string;
+      description: string;
+      targetChannels: string[];
+      expectedOutcome: string;
+    }[];
+    messagingRefinements: {
+      currentProblem: string;
+      proposedMessaging: string;
+      reasoning: string;
+    }[];
+    competitivePositioning?: {
+      marketDifferentiator: string;
+      threats: string[];
+      opportunities: string[];
+    };
+    buyerPersonas?: {
+      personaName: string;
+      painPoints: string[];
+      contentPreferences: string[];
+    }[];
+    pricingStrategy?: string;
   };
   detailedActionPlan?: {
     technical: string[];

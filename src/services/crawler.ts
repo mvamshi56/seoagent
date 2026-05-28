@@ -161,6 +161,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
   await db.updateStatus(true, 0, startUrlNormalized, hasRobots, hasSitemap);
 
   let processedCount = 0;
+  let startedCount = 0;
   let activeWorkers = 0;
   let activePlaywrights = 0;
   let browser: any = null;
@@ -177,7 +178,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
     db.updateStatus(
       true,
       progress,
-      `Audit [${processedCount + 1}/${maxPages}]: ${url}`,
+      `Audit [${startedCount}/${maxPages}]: ${url}`,
     ).catch(() => {});
 
     let htmlContent = "";
@@ -234,21 +235,26 @@ export async function audit(startUrl: string, config: AuditConfig) {
       }
 
       // Fallback to Playwright if fetch failed or returned invalid content
-      // On constrained environments like Render Free tier, we only want to use Playwright when absolutely necessary
-      if (!htmlContent || htmlContent.length < 1000) {
-        const isRender = process.env.RENDER || process.env.NODE_ENV === 'production';
-        
-        if (isRender) {
-          // Playwright consumes too much RAM for Render Free Tier constraints
-          console.warn(`Skipping Playwright fallback for ${url} in production to prevent OOM.`);
-        } else {
-          // Local environment: Limit active Playwright instances
-          while (activePlaywrights >= 2) {
-             await new Promise((r) => setTimeout(r, 200));
-          }
-          activePlaywrights++;
+      const urlKey = url
+        .replace(/\/$/, "")
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .toLowerCase();
+      const startKey = startUrlNormalized
+        .replace(/\/$/, "")
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .toLowerCase();
+      const isRoot = urlKey === startKey;
+      
+      const isLikelySPA = htmlContent && htmlContent.length < 3000 && htmlContent.toLowerCase().includes('<script');
 
-          try {
+      if (!htmlContent || isLikelySPA) {
+        // Wait if too many Playwright instances are running to prevent memory crashes
+        while (activePlaywrights >= 8) {
+           await new Promise((r) => setTimeout(r, 100));
+        }
+        activePlaywrights++;
+
+        try {
             if (!browser) {
               while (isLaunchingBrowser) {
                 await new Promise((r) => setTimeout(r, 100));
@@ -290,21 +296,41 @@ export async function audit(startUrl: string, config: AuditConfig) {
 
               const page = await context.newPage();
 
-              // Optimization: Block heavy resources
-              await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,webm,ogg,mp3,wav,flac,aac,woff,woff2,ttf,otf,eot,css}', route => route.abort());
+              // Optimization: Block heavy resources and non-essential trackers/analytics to speed up crawl tremendously
+              await page.route('**/*', (route) => {
+                const urlStr = route.request().url().toLowerCase();
+                const isAsset = 
+                  urlStr.endsWith('.png') || urlStr.endsWith('.jpg') || urlStr.endsWith('.jpeg') ||
+                  urlStr.endsWith('.gif') || urlStr.endsWith('.webp') || urlStr.endsWith('.svg') ||
+                  urlStr.endsWith('.woff') || urlStr.endsWith('.woff2') || urlStr.endsWith('.ttf') ||
+                  urlStr.endsWith('.css') || urlStr.endsWith('.mp4') || urlStr.endsWith('.mp3');
+                
+                const isTracker = 
+                  urlStr.includes('analytics') || urlStr.includes('tracker') || 
+                  urlStr.includes('gtm.js') || urlStr.includes('analytics.js') ||
+                  urlStr.includes('facebook') || urlStr.includes('hotjar') || 
+                  urlStr.includes('doubleclick') || urlStr.includes('intercom') ||
+                  urlStr.includes('google-analytics');
+
+                if (isAsset || isTracker) {
+                  return route.abort();
+                }
+                return route.continue();
+              });
 
               try {
                 let resp = await page
-                  .goto(url, { waitUntil: "domcontentloaded", timeout: 15000 })
+                  .goto(url, { waitUntil: "domcontentloaded", timeout: 8000 })
                   .catch(() => null);
                 
                 // Cloudflare Bypass Attempt
                 const title = await page.title().catch(() => "");
-                if (
+                const isBlocked = 
                   title.toLowerCase().includes("just a moment") ||
                   title.toLowerCase().includes("cloudflare") ||
-                  title.toLowerCase().includes("attention required")
-                ) {
+                  title.toLowerCase().includes("attention required");
+
+                if (isBlocked) {
                   db.updateStatus(
                     true,
                     progress,
@@ -318,18 +344,16 @@ export async function audit(startUrl: string, config: AuditConfig) {
                   await page.mouse
                     .click(Math.random() * 500, Math.random() * 500)
                     .catch(() => {});
-                  await page.waitForTimeout(3000);
-                } else {
-                  await page.waitForTimeout(500);
+                  await page.waitForTimeout(2000);
+                } else if (isRoot) {
+                  // Only add landing warmup/scroll for the root page
+                  await page.waitForTimeout(400);
+                  await page
+                    .evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2))
+                    .catch(() => {});
+                  await page.waitForTimeout(100);
+                  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
                 }
-
-                await page
-                  .evaluate(() =>
-                    window.scrollTo(0, document.body.scrollHeight / 2),
-                  )
-                  .catch(() => {});
-                await page.waitForTimeout(100);
-                await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 
                 finalUrl = page.url();
                 htmlContent = await page.content();
@@ -355,7 +379,6 @@ export async function audit(startUrl: string, config: AuditConfig) {
             activePlaywrights--;
           }
         }
-      }
     } catch (e: any) {
       console.error(`Outer crawl logic failed for ${url}:`, e.message);
     }
@@ -427,7 +450,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
   }
 
   const runWorker = async () => {
-    while (processedCount < maxPages) {
+    while (startedCount < maxPages) {
       const task = queue.shift();
       if (!task) {
         // If queue is empty, wait and check if others are still working
@@ -440,6 +463,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
         continue;
       }
 
+      startedCount++;
       activeWorkers++;
       try {
         await getPageData(task.url, task.currentDepth);
@@ -454,7 +478,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
   };
 
   try {
-    const workerCount = process.env.RENDER || process.env.NODE_ENV === 'production' ? 4 : 8; // Reduce concurrency to perform better on limited RAM hosting like Render Free
+    const workerCount = process.env.RENDER || process.env.NODE_ENV === 'production' ? 12 : 20; // Increase concurrency heavily since most requests use fetch
     const workers = Array.from({ length: workerCount }, () => runWorker());
     await Promise.all(workers);
   } catch (error) {

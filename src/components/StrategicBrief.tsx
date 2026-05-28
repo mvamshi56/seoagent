@@ -25,9 +25,10 @@ interface StrategicBriefProps {
   aiInsight?: any;
   isGeneratingAI?: boolean;
   onRegenerateAI?: () => void;
+  agentProgress?: string;
 }
 
-export function StrategicBrief({ pages, stats, auditEndTime, onDownloadPDF, aiInsight, isGeneratingAI, onRegenerateAI }: StrategicBriefProps) {
+export function StrategicBrief({ pages, stats, auditEndTime, onDownloadPDF, aiInsight, isGeneratingAI, onRegenerateAI, agentProgress }: StrategicBriefProps) {
   const [isDeckExpanded, setIsDeckExpanded] = React.useState(false);
 
   if (!stats || pages.length === 0) {

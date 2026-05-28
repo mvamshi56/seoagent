@@ -46,7 +46,12 @@ import {
   Target,
   Box,
   Brain,
-  Trash2
+  Trash2,
+  FlaskConical,
+  Megaphone,
+  Scale,
+  ShieldAlert,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -68,6 +73,15 @@ import { cn } from './lib/utils';
 import { AIStrategyPanel } from './components/AIStrategyPanel';
 import { AIAssistant } from './components/AIAssistant';
 import { StrategicBrief } from './components/StrategicBrief';
+import { ExperimentationPanel } from './components/ExperimentationPanel';
+import { MarketIntelligencePanel } from './components/MarketIntelligencePanel';
+import { PromptfooPanel } from './components/PromptfooPanel';
+import { ScoringModelPanel } from './components/ScoringModelPanel';
+import { SecurityRiskPanel } from './components/SecurityRiskPanel';
+import { AIBenchmarkPanel } from './components/AIBenchmarkPanel';
+import { AIUXAuditPanel } from './components/AIUXAuditPanel';
+import { SEOCheckPanel } from './components/SEOCheckPanel';
+import { Terminal } from 'lucide-react';
 import { SEOPage, AuditStats, AIInsightData } from './types/seo';
 import { generateSEOReportPDF } from './utils/pdfGenerator';
 
@@ -107,7 +121,7 @@ const getJitteredScore = (url: string, baseScore: number, index: number) => {
 
 export default function App() {
   console.log("App component rendering...");
-  const [activeTab, setActiveTab] = useState<'overview' | 'pages' | 'ai' | 'brief' | 'strategy'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'pages' | 'scoring-model' | 'security-risk' | 'ai-benchmark' | 'ai-ux-audit' | 'seo-check' | 'ai' | 'brief' | 'strategy' | 'experimentation' | 'market' | 'promptfoo'>('overview');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [url, setUrl] = useState('');
   const [maxPages, setMaxPages] = useState(1000);
@@ -120,6 +134,7 @@ export default function App() {
   const [selectedPage, setSelectedPage] = useState<SEOPage | null>(null);
   const [aiInsight, setAiInsight] = useState<AIInsightData | string | null>(null);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [agentProgress, setAgentProgress] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
   const [auditStartTime, setAuditStartTime] = useState<number | null>(null);
   const [auditEndTime, setAuditEndTime] = useState<number | null>(null);
@@ -253,6 +268,48 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isAuditing]);
 
+  const [isScanningPlagiarism, setIsScanningPlagiarism] = useState(false);
+  const handleCheckPlagiarism = async (pageUrl: string) => {
+    setIsScanningPlagiarism(true);
+    try {
+      const res = await fetch("/api/ai/check-plagiarism", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: aiProvider,
+          url: pageUrl,
+          title: selectedPage?.title,
+          description: selectedPage?.description,
+          bodyText: selectedPage?.bodyText,
+          keys: apiKeys
+        })
+      });
+      if (!res.ok) {
+        throw new Error("Failed to scan page content: " + await res.text());
+      }
+      const data = await res.json();
+      
+      setPages(prevPages => {
+        const updated = prevPages.map(p => {
+          if (p.url === pageUrl) {
+            return { ...p, aiPlagiarism: data };
+          }
+          return p;
+        });
+        
+        const match = updated.find(p => p.url === pageUrl);
+        if (match) setSelectedPage(match);
+        
+        return updated;
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to scan plagiarism content.");
+    } finally {
+      setIsScanningPlagiarism(false);
+    }
+  };
+
   const startAudit = async () => {
     let targetUrl = url.trim();
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
@@ -321,8 +378,20 @@ export default function App() {
 
       if (aiProvider === 'gemini') {
         // Direct client-side call for Gemini as per guidelines
-        insightRaw = await generateGeminiInsights(currentStats, optimizedPages, apiKeys.gemini);
+        setAgentProgress("Initializing CrewAI Multi-Agent Engine...");
+        insightRaw = await generateGeminiInsights(
+          currentStats, 
+          optimizedPages, 
+          apiKeys.gemini,
+          (msg) => setAgentProgress(msg)
+        );
       } else {
+        const gKeyRaw = apiKeys.gemini || '';
+        const effectiveKeys = {
+          ...apiKeys,
+          gemini: (gKeyRaw === 'MY_GEMINI_API_KEY' || gKeyRaw === 'YOUR_GEMINI_API_KEY' ? process.env.GEMINI_API_KEY : gKeyRaw) || process.env.GEMINI_API_KEY || ''
+        };
+
         const res = await fetch('/api/ai/insights', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -330,7 +399,7 @@ export default function App() {
             provider: aiProvider, 
             stats: currentStats, 
             pages: optimizedPages,
-            keys: apiKeys
+            keys: effectiveKeys
           })
         });
         
@@ -419,8 +488,8 @@ export default function App() {
               </div>
               {!isSidebarCollapsed && (
                 <div className="flex flex-col">
-                  <span className="font-bold text-slate-900 tracking-tight">Auditor</span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mt-1">SEO Intelligence</span>
+                  <span className="font-bold text-slate-900 tracking-tight">GEO Audit Agent</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mt-1">Intelligence Agent</span>
                 </div>
               )}
            </div>
@@ -440,6 +509,41 @@ export default function App() {
               onClick={() => setActiveTab('pages')} 
               icon={<Search size={18} />} 
               label="Audit Data" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'scoring-model'} 
+              onClick={() => setActiveTab('scoring-model')} 
+              icon={<Scale size={18} />} 
+              label="Scoring Model" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'security-risk'} 
+              onClick={() => setActiveTab('security-risk')} 
+              icon={<ShieldAlert size={18} />} 
+              label="AI Security" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'ai-benchmark'} 
+              onClick={() => setActiveTab('ai-benchmark')} 
+              icon={<TrendingUp size={18} />} 
+              label="AI Benchmark" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'ai-ux-audit'} 
+              onClick={() => setActiveTab('ai-ux-audit')} 
+              icon={<Compass size={18} />} 
+              label="AI UX Audit" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'seo-check'} 
+              onClick={() => setActiveTab('seo-check')} 
+              icon={<CheckSquare size={18} />} 
+              label="SEO Check" 
               collapsed={isSidebarCollapsed}
             />
             <SidebarLink 
@@ -463,8 +567,66 @@ export default function App() {
               label="Growth Directive" 
               collapsed={isSidebarCollapsed}
             />
+            <SidebarLink 
+              active={activeTab === 'experimentation'} 
+              onClick={() => setActiveTab('experimentation')} 
+              icon={<FlaskConical size={18} />} 
+              label="RAG Strategy Lab" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'market'} 
+              onClick={() => setActiveTab('market')} 
+              icon={<Megaphone size={18} />} 
+              label="Market Intelligence" 
+              collapsed={isSidebarCollapsed}
+            />
+            <SidebarLink 
+              active={activeTab === 'promptfoo'} 
+              onClick={() => setActiveTab('promptfoo')} 
+              icon={<Terminal size={18} />} 
+              label="Promptfoo Studio" 
+              collapsed={isSidebarCollapsed}
+            />
           </nav>
         </div>
+
+        {!isSidebarCollapsed && stats && (
+          <div className="mx-6 mb-6 p-4 bg-slate-50 border border-slate-200/50 rounded-2xl space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-350">
+            <div className="flex justify-between items-center">
+              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider font-mono">System Health</span>
+              <span className={cn(
+                "text-[9px] font-black uppercase px-2 py-0.5 rounded-md text-[8px] tracking-wide border",
+                stats.averageScore >= 80 ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                stats.averageScore >= 50 ? "bg-amber-50 text-amber-600 border-amber-100" :
+                "bg-rose-50 text-rose-600 border-rose-100"
+              )}>
+                {stats.averageScore >= 80 ? "Healthy" : stats.averageScore >= 50 ? "Moderate" : "Critical"}
+              </span>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between items-baseline">
+                <span className="text-[10px] font-extrabold text-slate-500">SEO Index</span>
+                <span className="text-sm font-black text-slate-900 font-display">{stats.averageScore}%</span>
+              </div>
+              <div className="h-1 w-full bg-slate-200/60 rounded-full overflow-hidden">
+                <div 
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    stats.averageScore >= 80 ? "bg-emerald-500" :
+                    stats.averageScore >= 50 ? "bg-amber-500" :
+                    "bg-rose-500"
+                  )} 
+                  style={{ width: `${stats.averageScore}%` }} 
+                />
+              </div>
+            </div>
+            <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+              <span>{pages.length} Pages</span>
+              <span>{stats.criticalIssues} Violations</span>
+            </div>
+          </div>
+        )}
 
         <div className={cn("px-6 mt-auto mb-4", isSidebarCollapsed && "px-2")}>
           <button
@@ -484,7 +646,7 @@ export default function App() {
       {/* Main Panel */}
       <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
         {/* Header - Advanced Command Deck */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 lg:px-10 shrink-0 z-20 shadow-sm">
+        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-6 lg:px-10 shrink-0 z-40 sticky top-0 shadow-sm transition-all duration-300">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
               {url ? (
@@ -501,50 +663,50 @@ export default function App() {
             </div>
           </div>
           
-          <div className="flex items-center gap-4 flex-1 max-w-2xl px-8 min-w-0">
+          <div className="flex items-center gap-2 lg:gap-4 flex-1 max-w-3xl px-2 lg:px-4 xl:px-6 min-w-0">
             {/* Input Bar */}
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 shadow-sm focus-within:ring-2 focus-within:ring-blue-600/10 focus-within:border-blue-600/30 transition-all h-10 group w-full">
-              <div className="hidden lg:flex items-center gap-2 px-3 border-r border-slate-200 h-full shrink-0">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Nodes</span>
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl p-1 shadow-sm hover:shadow-md focus-within:ring-4 focus-within:ring-blue-600/10 focus-within:border-blue-600/40 focus-within:bg-white transition-all h-14 group w-full min-w-0">
+              <div className="hidden xl:flex items-center gap-3 px-4 border-r border-slate-200 h-full shrink-0">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nodes</span>
                 <input 
                   type="number" 
                   value={maxPages} 
                   onChange={(e) => setMaxPages(parseInt(e.target.value) || 10)}
-                  className="w-16 bg-transparent text-xs font-bold text-slate-700 outline-none"
+                  className="w-16 bg-transparent text-sm font-black text-slate-700 outline-none"
                 />
               </div>
-              <div className="hidden lg:flex items-center gap-2 px-3 border-r border-slate-200 h-full shrink-0">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Depth</span>
+              <div className="hidden xl:flex items-center gap-3 px-4 border-r border-slate-200 h-full shrink-0">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Depth</span>
                 <input 
                   type="number" 
                   value={depth} 
                   onChange={(e) => setDepth(parseInt(e.target.value) || 1)}
-                  className="w-12 bg-transparent text-xs font-bold text-slate-700 outline-none"
+                  className="w-12 bg-transparent text-sm font-black text-slate-700 outline-none"
                 />
               </div>
-              <div className="relative h-full flex-1 flex items-center px-4 min-w-0">
-                <Globe size={14} className="text-slate-400 group-focus-within:text-blue-600 transition-colors shrink-0" />
+              <div className="relative h-full flex-1 flex items-center px-3 sm:px-5 min-w-0">
+                <Globe size={18} className="text-slate-400 group-focus-within:text-blue-600 transition-colors shrink-0" />
                 <input 
                   type="text" 
-                  placeholder="Analyze URL..."
+                  placeholder="https://example.com"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  className="bg-transparent px-3 py-1 text-sm text-slate-700 outline-none w-full font-medium placeholder:text-slate-300 border-none"
+                  className="bg-transparent px-3 sm:px-4 py-2 text-base text-slate-900 outline-none w-full min-w-0 font-bold placeholder:text-slate-300 border-none placeholder:font-medium"
                 />
               </div>
               <button 
                 onClick={startAudit}
                 disabled={isAuditing || !url}
                 className={cn(
-                  "px-6 h-full rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all transition-all flex items-center justify-center gap-2 shrink-0",
+                  "px-4 sm:px-8 h-full rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 shrink-0",
                   isAuditing 
-                    ? "bg-slate-200 text-slate-500" 
-                    : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm active:scale-95"
+                    ? "bg-slate-100 text-slate-400 border border-slate-200" 
+                    : "bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 active:scale-95"
                 )}
               >
-                {isAuditing ? <RefreshCw className="animate-spin" size={12} /> : (
+                {isAuditing ? <RefreshCw className="animate-spin" size={14} /> : (
                   <>
-                    <Zap size={12} />
+                    <Zap size={14} className="fill-current" />
                     <span className="hidden sm:inline">Launch</span>
                   </>
                 )}
@@ -565,7 +727,7 @@ export default function App() {
               <Settings size={14} className="text-slate-400 group-hover:rotate-90 transition-transform duration-500" />
             </button>
             {isAuditing && (
-              <div className="hidden lg:flex flex-col gap-1 w-64 mr-2 shrink-0">
+              <div className="flex flex-col gap-1 w-48 md:w-64 mr-2 shrink-0">
                  <div className="flex justify-between items-center text-[9px] font-bold text-blue-600 uppercase tracking-wider">
                    <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse" /><span>Crawling</span></div>
                    <span>{progress}% • {auditElapsedTime}s</span>
@@ -1015,7 +1177,7 @@ export default function App() {
                                   const displayScore = getJitteredScore(p.url, p.score, i);
 
                                   return (
-                                   <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                                   <tr key={i} className="hover:bg-blue-50/50 hover:shadow-[inset_4px_0_0_#2563eb] transition-all duration-300">
                                       <td className="px-6 py-4 border-b border-slate-50 font-mono text-[10px] text-slate-900 break-all line-clamp-2" title={p.url}>{p.url}</td>
                                       <td className="px-6 py-4 border-b border-slate-50">
                                          <span className="text-xs font-bold text-rose-600">{(p.loadTime / 1000).toFixed(2)}s</span>
@@ -1291,13 +1453,15 @@ export default function App() {
                       </div>
                    </>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-32 space-y-4">
-                    <div className="w-16 h-16 bg-white border border-slate-200 rounded-2xl flex items-center justify-center text-slate-300">
-                      <Layout size={32} strokeWidth={1} />
+                  <div className="flex flex-col items-center justify-center py-20 px-8 text-center max-w-2xl mx-auto space-y-6">
+                    <div className="w-20 h-20 bg-blue-50 border border-blue-100 rounded-[30px] flex items-center justify-center text-blue-600 shadow-sm">
+                      <Shield size={36} strokeWidth={1.5} />
                     </div>
-                    <div className="text-center">
-                      <h3 className="font-bold text-slate-900">No telemetry data</h3>
-                      <p className="text-sm text-slate-400">Initialize an audit to generate the site graph</p>
+                    <div>
+                      <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-3">Ensure your web pages are fully optimized for the future of search</h3>
+                      <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                        Use for frequent, fast GEO checks to get an understanding of your AI search readiness, from crawler accessibility to content structure, and receive a prioritized action plan to boost your visibility.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1349,28 +1513,72 @@ export default function App() {
                     />
                   </div>
                 </div>
+
+                {stats && (
+                  <div className="bg-slate-900 border-y border-slate-800 py-3 relative overflow-hidden flex">
+                    <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-slate-900 to-transparent z-10" />
+                    <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-slate-900 to-transparent z-10" />
+                    
+                    <motion.div 
+                      animate={{ x: [0, -1000] }}
+                      transition={{ repeat: Infinity, ease: "linear", duration: 20 }}
+                      className="flex items-center gap-8 whitespace-nowrap px-4 w-max"
+                    >
+                      {[...Array(4)].map((_, i) => (
+                        <div key={i} className="flex items-center gap-8">
+                          <div className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Nodes Indexed:</span>
+                            <span className="text-[11px] font-black text-white">{pages.length}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Health:</span>
+                            <span className="text-[11px] font-black text-emerald-400">{stats.averageScore}/100</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Critical Violations:</span>
+                            <span className="text-[11px] font-black text-rose-400">{stats.criticalIssues}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Warnings:</span>
+                            <span className="text-[11px] font-black text-amber-400">{stats.warningIssues}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Activity size={10} className="text-fuchsia-500" />
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Schema Coverage:</span>
+                            <span className="text-[11px] font-black text-white">{stats.structuredDataCoverage}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </motion.div>
+                  </div>
+                )}
+
                 <div 
                   id="audit-table-container"
                   className="max-h-[750px] overflow-auto custom-scrollbar"
                 >
                   <table className="w-full text-left border-collapse min-w-[1200px]">
-                    <thead className="bg-[#f8fafc] text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap sticky top-0 z-20 border-b border-slate-200">
+                    <thead className="bg-[#f8fafc] text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap sticky top-0 z-20 border-b border-slate-200 shadow-sm">
                       <tr className="divide-x divide-slate-100">
-                        <th className="px-6 py-6 w-16 text-center bg-[#f8fafc]">SEL</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500">Endpoint</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Score</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">T2C Ratio</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500">Asset Health</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500">Detections</th>
-                        <th className="px-8 py-6 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Network</th>
-                        <th className="px-8 py-6 text-right pr-10 bg-[#f8fafc] italic font-display lowercase tracking-tight text-sm text-slate-500">Controls</th>
+                        <th className="px-6 py-6 w-16 text-center bg-slate-50">SEL</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Endpoint</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Score</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">T2C Ratio</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Asset Health</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Detections</th>
+                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Network</th>
+                        <th className="px-8 py-6 text-right pr-10 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Controls</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                     {paginatedPages.map((page, idx) => (
                       <tr 
                         key={idx} 
-                        className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                        className="hover:bg-blue-50/50 transition-all duration-300 group cursor-pointer hover:shadow-[inset_4px_0_0_#2563eb]"
                         onClick={() => setSelectedPage(page)}
                       >
                         <td className="px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1539,7 +1747,7 @@ export default function App() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="h-full overflow-y-auto p-6 md:p-10 custom-scrollbar"
+                className="w-full"
               >
                 <div className="max-w-7xl mx-auto">
                   <AIStrategyPanel 
@@ -1555,6 +1763,7 @@ export default function App() {
                     pages={pages}
                     auditEndTime={auditEndTime}
                     apiKeys={apiKeys}
+                    agentProgress={agentProgress}
                   />
                 </div>
               </motion.div>
@@ -1565,7 +1774,7 @@ export default function App() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="h-full overflow-y-auto p-6 md:p-10 custom-scrollbar"
+                className="w-full"
               >
                 <div className="max-w-5xl mx-auto">
                   <StrategicBrief 
@@ -1576,6 +1785,153 @@ export default function App() {
                     aiInsight={aiInsight}
                     isGeneratingAI={isGeneratingAI}
                     onRegenerateAI={handleRetryAI}
+                    agentProgress={agentProgress}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'experimentation' && (
+              <motion.div
+                key="experimentation"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <ExperimentationPanel 
+                    insight={aiInsight}
+                    isGeneratingAI={isGeneratingAI}
+                    onRegenerateAI={handleRetryAI}
+                    agentProgress={agentProgress}
+                    pages={pages}
+                    apiKeys={apiKeys}
+                    aiProvider={aiProvider}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'market' && (
+              <motion.div
+                key="market"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <MarketIntelligencePanel 
+                    insight={aiInsight}
+                    isGeneratingAI={isGeneratingAI}
+                    onRegenerateAI={handleRetryAI}
+                    agentProgress={agentProgress}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'promptfoo' && (
+              <motion.div
+                key="promptfoo-panel"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <PromptfooPanel apiKeys={apiKeys} />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'scoring-model' && (
+              <motion.div
+                key="scoring-model"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <ScoringModelPanel 
+                    pages={pages}
+                    stats={stats}
+                    selectedPageUrl={selectedPage?.url}
+                    onPageSelect={(page) => {
+                      setSelectedPage(page);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'security-risk' && (
+              <motion.div
+                key="security-risk"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <SecurityRiskPanel 
+                    pages={pages}
+                    selectedPageUrl={selectedPage?.url}
+                    onPageSelect={(page) => {
+                      setSelectedPage(page);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'ai-benchmark' && (
+              <motion.div
+                key="ai-benchmark"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <AIBenchmarkPanel 
+                    pages={pages}
+                    selectedPageUrl={selectedPage?.url}
+                    targetDomain={url}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'ai-ux-audit' && (
+              <motion.div
+                key="ai-ux-audit"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <AIUXAuditPanel 
+                    pages={pages}
+                    selectedPageUrl={selectedPage?.url}
+                    onPageSelect={(page) => {
+                      setSelectedPage(page);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'seo-check' && (
+              <motion.div
+                key="seo-check"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full"
+              >
+                <div className="max-w-7xl mx-auto">
+                  <SEOCheckPanel 
+                    pages={pages}
+                    selectedPageUrl={selectedPage?.url}
+                    onPageSelect={(page) => {
+                      setSelectedPage(page);
+                    }}
                   />
                 </div>
               </motion.div>
@@ -1630,6 +1986,318 @@ export default function App() {
                 </div>
               
               <div className="space-y-12">
+                {/* AI Content Authenticity & Plagiarism Scanner */}
+                <section className="p-6 border border-slate-200/60 rounded-2xl bg-slate-50/20 relative overflow-hidden backdrop-blur-sm shadow-sm">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-[40px] pointer-events-none" />
+                  
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-900 mb-4 flex justify-between items-center">
+                    <span>AI Content & Plagiarism Audit</span>
+                    {selectedPage.aiPlagiarism && (
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider",
+                        selectedPage.aiPlagiarism.isHumanAuthentic ? "bg-emerald-50 text-emerald-700 border border-emerald-150" : "bg-amber-100 text-amber-700 border border-amber-200"
+                      )}>
+                        {selectedPage.aiPlagiarism.isHumanAuthentic ? "Authentic Human" : "AI Synthesized"}
+                      </span>
+                    )}
+                  </h4>
+
+                  {!selectedPage.aiPlagiarism ? (
+                    <div className="space-y-4">
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Linguistically audit this page's text using <strong className="text-slate-700">{aiProvider.toUpperCase()}</strong> to verify natural style burstiness, evaluate E-E-A-T uniqueness, and target word redundancy.
+                      </p>
+                      
+                      {isScanningPlagiarism ? (
+                        <div className="space-y-3 py-1">
+                          <div className="flex items-center gap-3">
+                            <motion.div 
+                              animate={{ rotate: 360 }} 
+                              transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                              className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full" 
+                            />
+                            <div className="text-xs font-semibold text-slate-700 animate-pulse">Running Deep Neural Scanner...</div>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: "10%" }}
+                              animate={{ width: ["10%", "45%", "80%", "98%"] }}
+                              transition={{ duration: 12, repeat: Infinity, repeatType: "reverse" }}
+                              className="h-full bg-indigo-600 rounded-full" 
+                            />
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-mono italic leading-normal">
+                            Parsing and scoring stylistic n-grams for semantic copycat probability...
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleCheckPlagiarism(selectedPage.url)}
+                          className="w-full py-2.5 px-4 bg-slate-955 hover:bg-slate-900 bg-slate-900 text-white font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-[0.982]"
+                        >
+                          <Sparkles size={13} className="text-indigo-400" />
+                          <span>Analyze Originality & AI Plagiarism</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-4 border border-slate-200 rounded-xl bg-white shadow-xs">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">AI Written Ratio</div>
+                          <div className="flex items-baseline gap-1">
+                            <span className={cn(
+                              "text-3xl font-black font-sans tracking-tight",
+                              selectedPage.aiPlagiarism.aiPercentage > 60 ? "text-rose-600" :
+                              selectedPage.aiPlagiarism.aiPercentage > 30 ? "text-amber-500" : "text-emerald-500"
+                            )}>
+                              {selectedPage.aiPlagiarism.aiPercentage}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1 rounded-full mt-2.5 overflow-hidden">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full",
+                                selectedPage.aiPlagiarism.aiPercentage > 60 ? "bg-rose-500" :
+                                selectedPage.aiPlagiarism.aiPercentage > 30 ? "bg-amber-500" : "bg-emerald-500"
+                              )} 
+                              style={{ width: `${selectedPage.aiPlagiarism.aiPercentage}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="p-4 border border-slate-200 rounded-xl bg-white shadow-xs">
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Information Gain</div>
+                          <div className="flex items-baseline gap-1">
+                            <span className={cn(
+                              "text-3xl font-black font-sans tracking-tight",
+                              selectedPage.aiPlagiarism.uniquenessIndex > 75 ? "text-emerald-500" :
+                              selectedPage.aiPlagiarism.uniquenessIndex > 45 ? "text-amber-500" : "text-rose-600"
+                            )}>
+                              {selectedPage.aiPlagiarism.uniquenessIndex}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1 rounded-full mt-2.5 overflow-hidden">
+                            <div 
+                              className={cn(
+                                "h-full rounded-full",
+                                selectedPage.aiPlagiarism.uniquenessIndex > 75 ? "bg-emerald-500" :
+                                selectedPage.aiPlagiarism.uniquenessIndex > 45 ? "bg-amber-500" : "bg-rose-500"
+                              )} 
+                              style={{ width: `${selectedPage.aiPlagiarism.uniquenessIndex}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                       <div className="p-4 border border-slate-200 rounded-xl bg-white text-xs text-slate-750 leading-relaxed shadow-xs">
+                        <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Audit Findings</div>
+                        <p className="text-slate-900 font-bold mb-1.5 text-xs">{selectedPage.aiPlagiarism.verdict}</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed font-normal">{selectedPage.aiPlagiarism.findings}</p>
+                      </div>
+
+                      {/* Google Core Search Quality Risks Audit */}
+                      <div className="space-y-3.5">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+                          <span>Google Search Core Quality Risks</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {[
+                            {
+                              id: 'generic-ai',
+                              name: 'Generic AI Article Likelihood',
+                              score: selectedPage.aiPlagiarism.genericAiScore ?? Math.round(selectedPage.aiPlagiarism.aiPercentage * 0.8),
+                              description: 'Assesses if the article is a boilerplate synthesized overview lacking first-hand human experience.',
+                              icon: FileText,
+                              color: 'indigo'
+                            },
+                            {
+                              id: 'hallucinated',
+                              name: 'Hallucinated Facts & Errors',
+                              score: selectedPage.aiPlagiarism.hallucinatedFactsScore ?? (selectedPage.aiPlagiarism.aiPercentage > 50 ? 25 : 10),
+                              description: 'Detects fabricated claims, unsubstantiated numbers, or typical semantic hallucinations.',
+                              icon: Brain,
+                              color: 'rose'
+                            },
+                            {
+                              id: 'expert-review',
+                              name: 'Lack of Expert Review (E-E-A-T)',
+                              score: selectedPage.aiPlagiarism.noExpertReviewScore ?? 35,
+                              description: 'Checks for authenticated expert authorship credentials, or medical / financial disclaimers.',
+                              icon: Shield,
+                              color: 'amber'
+                            },
+                            {
+                              id: 'mass-seo',
+                              name: 'Mass-produced SEO Template Dev',
+                              score: selectedPage.aiPlagiarism.massProducedSeoScore ?? (selectedPage.aiPlagiarism.clicheDensity > 15 ? 60 : 30),
+                              description: 'Exposes mechanical programmatic keyword stuffing built for crawlers rather than humans.',
+                              icon: Layers,
+                              color: 'emerald'
+                            }
+                          ].map((risk) => {
+                            const score = risk.score;
+                            const riskLevel = score >= 70 ? 'Critical' : score >= 40 ? 'High Risk' : score >= 20 ? 'Moderate' : 'Secure';
+                            const badgeColor = 
+                              score >= 70 ? 'bg-rose-50 text-rose-700 border-rose-200' : 
+                              score >= 40 ? 'bg-amber-50 text-amber-700 border-amber-200' : 
+                              score >= 20 ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+                              'bg-emerald-50 text-emerald-700 border-emerald-200';
+                            
+                            const Icon = risk.icon;
+                            
+                            // Find matching detailed finding from backend if any
+                            const detailedFinding = selectedPage.aiPlagiarism?.riskFindings?.find(
+                              f => f.riskName.toLowerCase().includes(risk.name.toLowerCase().substring(0, 10)) ||
+                                   risk.name.toLowerCase().includes(f.riskName.toLowerCase().substring(0, 10))
+                            );
+
+                            return (
+                              <div key={risk.id} className="p-4 border border-slate-200 rounded-xl bg-white shadow-xs flex flex-col justify-between space-y-3">
+                                <div>
+                                  <div className="flex justify-between items-start gap-2 mb-1.5">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <div className={cn(
+                                        "p-1.5 rounded-lg border shrink-0",
+                                        score >= 40 ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-slate-50 text-slate-500 border-slate-100"
+                                      )}>
+                                        <Icon size={13} />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-900 leading-tight block truncate text-ellipsis overflow-hidden">{risk.name}</span>
+                                    </div>
+                                    <span className={cn("px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded border shrink-0", badgeColor)}>
+                                      {riskLevel}
+                                    </span>
+                                  </div>
+                                  
+                                  <p className="text-[10px] text-slate-550 leading-relaxed font-normal">
+                                    {detailedFinding?.explanation || risk.description}
+                                  </p>
+                                </div>
+
+                                <div className="space-y-1.5 mt-auto pt-2 border-t border-slate-100">
+                                  <div className="flex justify-between items-center text-[10px] font-mono font-medium">
+                                    <span className="text-slate-450">Risk Intensity</span>
+                                    <span className={cn(
+                                      "font-bold",
+                                      score >= 70 ? "text-rose-600" : score >= 40 ? "text-amber-600" : "text-emerald-600"
+                                    )}>{score}%</span>
+                                  </div>
+                                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                    <div 
+                                      className={cn(
+                                        "h-full rounded-full transition-all duration-500",
+                                        score >= 70 ? "bg-rose-500" : score >= 40 ? "bg-amber-500" : "bg-emerald-500"
+                                      )}
+                                      style={{ width: `${score}%` }}
+                                    />
+                                  </div>
+                                  {detailedFinding?.solution && (
+                                    <p className="text-[9px] text-emerald-750 bg-emerald-50/50 p-2 rounded border border-emerald-100/40 mt-2 leading-relaxed">
+                                      <span className="font-bold text-emerald-900">Expert Solution:</span> {detailedFinding.solution}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Tone & Brand Voice Analysis Card */}
+                      <div className="p-4 border border-slate-200 rounded-xl bg-white text-xs leading-relaxed shadow-xs space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Linguistic Voice Profile</div>
+                            <div className="text-xs font-black text-slate-900 mt-0.5">{selectedPage.aiPlagiarism.detectedTone || "Neutral / Objective"}</div>
+                          </div>
+                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded text-[9px] font-mono font-bold tracking-tight">
+                            TONE DETECTED
+                          </span>
+                        </div>
+                        
+                        {selectedPage.aiPlagiarism.toneAnalysis && (
+                          <div className="text-slate-500 text-[11px] leading-relaxed">
+                            {selectedPage.aiPlagiarism.toneAnalysis}
+                          </div>
+                        )}
+
+                        {selectedPage.aiPlagiarism.toneScores && selectedPage.aiPlagiarism.toneScores.length > 0 && (
+                          <div className="space-y-2.5 pt-1">
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Voice Attributes</div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                              {selectedPage.aiPlagiarism.toneScores.map((ts, i) => (
+                                <div key={i} className="space-y-1">
+                                  <div className="flex justify-between items-center text-[10px] text-slate-600 font-medium font-mono">
+                                    <span>{ts.dimension}</span>
+                                    <span className="font-bold text-slate-900">{ts.score}%</span>
+                                  </div>
+                                  <div className="w-full bg-slate-150 h-1.5 rounded-full overflow-hidden bg-slate-100">
+                                    <div 
+                                      className={cn(
+                                        "h-full rounded-full transition-all duration-500",
+                                        ts.score > 75 ? "bg-indigo-600" :
+                                        ts.score > 45 ? "bg-blue-500" : "bg-slate-400"
+                                      )}
+                                      style={{ width: `${ts.score}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {selectedPage.aiPlagiarism.detectedCliches.length > 0 && (
+                        <div>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2">Detected AI Vocabulary Blocks</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedPage.aiPlagiarism.detectedCliches.map((cliche, i) => (
+                              <span key={i} className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-100 rounded text-[10px] font-mono tracking-tight font-semibold">
+                                {cliche}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedPage.aiPlagiarism.rewrites && selectedPage.aiPlagiarism.rewrites.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="text-[9px] font-bold text-indigo-600 uppercase tracking-widest">Enterprise Rewrite Plans to Increase GEO Rank</div>
+                          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                            {selectedPage.aiPlagiarism.rewrites.map((rw, i) => (
+                              <div key={i} className="border border-slate-100 rounded-xl p-3.5 space-y-2 bg-white shadow-xs">
+                                <div>
+                                  <div className="text-[8px] font-black text-rose-500 uppercase tracking-widest mb-1">Replace Cliché</div>
+                                  <p className="text-[11px] text-slate-400 line-through italic pl-2.5 border-l border-slate-200">"{rw.original}"</p>
+                                </div>
+                                <div>
+                                  <div className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">Human EEAT Translation</div>
+                                  <p className="text-[11px] text-slate-900 font-medium pl-2.5 border-l border-indigo-500">"{rw.suggested}"</p>
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-snug bg-slate-50 p-2 rounded border border-slate-100 mt-1">
+                                  <span className="font-bold text-slate-600">SEO Value:</span> {rw.benefit}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => handleCheckPlagiarism(selectedPage.url)}
+                        className="w-full py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-all border border-slate-200/80"
+                      >
+                        <RefreshCw size={11} className={isScanningPlagiarism ? "animate-spin" : ""} />
+                        <span>Re-scan Content</span>
+                      </button>
+                    </div>
+                  )}
+                </section>
+
                 {selectedPage.performance && (
                   <section>
                     <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-900 mb-6 border-b border-slate-100 pb-2 flex justify-between items-center">
@@ -2039,7 +2707,7 @@ export default function App() {
                     <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Active Neural Engine</label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { id: 'gemini', name: 'Gemini 2.0' },
+                        { id: 'gemini', name: 'Gemini 3.5' },
                         { id: 'openai', name: 'GPT-4o' },
                         { id: 'anthropic', name: 'Claude 3.5' },
                         { id: 'deepseek', name: 'DeepSeek v3' },
@@ -2060,6 +2728,74 @@ export default function App() {
                           {p.name}
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  <div className="h-px bg-slate-100" />
+
+                  {/* Crawl Parameters Block */}
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block">Audit Crawl Parameters</label>
+                    
+                    <div className="space-y-4">
+                      {/* Depth config */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-700 font-medium">Crawl Depth Limit</span>
+                          <span className="text-[10px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg">{depth} levels deep</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <input 
+                            type="range" 
+                            min="1" 
+                            max="50" 
+                            value={depth} 
+                            onChange={(e) => setDepth(parseInt(e.target.value) || 1)}
+                            className="flex-1 accent-blue-600 h-1 bg-slate-100 rounded-lg cursor-pointer"
+                          />
+                          <input 
+                            type="number" 
+                            min="1" 
+                            max="100" 
+                            value={depth} 
+                            onChange={(e) => setDepth(parseInt(e.target.value) || 1)}
+                            className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-xs font-bold text-slate-700 text-center focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          Maximum traverse depth from start page URL. Default is 10.
+                        </p>
+                      </div>
+
+                      {/* Max Pages config */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-700 font-medium">Max Crawled Pages</span>
+                          <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">{maxPages} pages</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="1000" 
+                            step="5"
+                            value={maxPages} 
+                            onChange={(e) => setMaxPages(parseInt(e.target.value) || 10)}
+                            className="flex-1 accent-indigo-600 h-1 bg-slate-100 rounded-lg cursor-pointer"
+                          />
+                          <input 
+                            type="number" 
+                            min="5" 
+                            max="5000" 
+                            value={maxPages} 
+                            onChange={(e) => setMaxPages(parseInt(e.target.value) || 10)}
+                            className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-xs font-bold text-slate-700 text-center focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          Hard limit on total pages audited across site hierarchy.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -2125,7 +2861,7 @@ export default function App() {
 }
 
 function ShareButtons({ url, title, className }: { url: string, title: string, className?: string }) {
-  const shareText = `SEO Audit for ${title}`;
+  const shareText = `GEO Audit for ${title}`;
   const encodedUrl = encodeURIComponent(url);
   const encodedTitle = encodeURIComponent(shareText);
 
@@ -2382,7 +3118,7 @@ function OptimizationTab({ insight, isGenerating, onRetry, auditEndTime, pages, 
             </thead>
             <tbody>
               {(report.priorityActionPlan || []).map((p: any) => (
-                <tr key={p.id || Math.random()} className="hover:bg-slate-50/50 transition-colors group">
+                <tr key={p.id || Math.random()} className="hover:bg-blue-50/50 hover:shadow-[inset_4px_0_0_#2563eb] transition-all duration-300 group cursor-default">
                   <td className="px-8 py-6 border-b border-slate-50 font-black text-slate-300 text-sm">{p.id}</td>
                   <td className="px-8 py-6 border-b border-slate-50">
                     <p className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{p.action}</p>
@@ -2679,7 +3415,7 @@ function OptimizationTab({ insight, isGenerating, onRetry, auditEndTime, pages, 
                             : (ap?.topIssue || "Synthesis pending technical validation");
 
                           return (
-                            <tr key={i} className="hover:bg-blue-50/30 transition-colors group">
+                            <tr key={i} className="hover:bg-blue-50/50 hover:shadow-[inset_4px_0_0_#2563eb] transition-all duration-300 group">
                                <td className="px-8 py-4 text-center">
                                   <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400 group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">{i+1}</div>
                                </td>
@@ -2717,9 +3453,33 @@ function OptimizationTab({ insight, isGenerating, onRetry, auditEndTime, pages, 
              )}
           </div>
         ) : (
-          <div className="bg-white border-2 border-dashed border-slate-200 rounded-[32px] p-24 text-center">
-             <Bot className="mx-auto text-slate-200 mb-4 animate-bounce" size={48} />
-             <p className="text-sm font-black text-slate-300 uppercase tracking-widest">Neural details for individual nodes are being synthesized.</p>
+          <div className="bg-white border border-slate-200 rounded-[40px] px-8 py-24 text-center shadow-xl relative overflow-hidden group">
+             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] transition-all duration-1000 group-hover:scale-150 group-hover:bg-blue-600/10" />
+             <div className="relative z-10 flex flex-col items-center max-w-2xl mx-auto space-y-6">
+                <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-2xl shadow-blue-500/30 transform transition-transform duration-500 hover:rotate-6">
+                  <Globe className="animate-pulse" size={48} strokeWidth={1.5} />
+                </div>
+                <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tighter italic">
+                  Initiate Neural Scan
+                </h1>
+                <p className="text-sm md:text-base font-bold text-slate-500 uppercase tracking-widest leading-relaxed max-w-lg">
+                  Provide a primary origin point above. The system will deploy sub-routine crawlers to map, index, and analyze technical constraints across the domain network.
+                </p>
+                <div className="pt-8 grid grid-cols-3 gap-6 opacity-60">
+                   <div className="flex flex-col items-center gap-2">
+                      <Target size={24} className="text-blue-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Deep Mapping</span>
+                   </div>
+                   <div className="flex flex-col items-center gap-2">
+                      <ShieldCheck size={24} className="text-emerald-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Threat Detection</span>
+                   </div>
+                   <div className="flex flex-col items-center gap-2">
+                      <Zap size={24} className="text-rose-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Performance Index</span>
+                   </div>
+                </div>
+             </div>
           </div>
         )}
       </section>
@@ -2812,14 +3572,132 @@ function DomainCheckItem({ label, status, desc }: { label: string, status: boole
 }
 
 function MetricCard({ label, value, sub, color }: { label: string, value: string | number, sub?: string, color?: string }) {
+  const getIconAndStyle = (lbl: string) => {
+    const clean = lbl.toLowerCase().trim();
+    if (clean.includes("node")) {
+      return {
+        icon: <Layers size={14} className="text-violet-600" />,
+        bg: "bg-violet-50/80",
+        border: "border-violet-100",
+        indicatorColor: "bg-violet-500",
+        hasProgress: false
+      };
+    }
+    if (clean.includes("score") && !clean.includes("geo")) {
+      return {
+        icon: <ShieldCheck size={14} className="text-blue-600" />,
+        bg: "bg-blue-50/80",
+        border: "border-blue-100",
+        indicatorColor: "bg-blue-500",
+        hasProgress: true,
+        progressVal: typeof value === 'number' ? value : (parseInt(value as string) || 0)
+      };
+    }
+    if (clean.includes("violation")) {
+      return {
+        icon: <AlertTriangle size={14} className="text-rose-600" />,
+        bg: "bg-rose-50/80",
+        border: "border-rose-100",
+        indicatorColor: "bg-rose-500",
+        hasProgress: false
+      };
+    }
+    if (clean.includes("broken")) {
+      return {
+        icon: <LinkIcon size={14} className="text-pink-600" />,
+        bg: "bg-pink-50/80",
+        border: "border-pink-100",
+        indicatorColor: "bg-pink-500",
+        hasProgress: false
+      };
+    }
+    if (clean.includes("total link")) {
+      return {
+        icon: <Compass size={14} className="text-sky-600" />,
+        bg: "bg-sky-50/80",
+        border: "border-sky-100",
+        indicatorColor: "bg-sky-500",
+        hasProgress: false
+      };
+    }
+    if (clean.includes("image alt")) {
+      return {
+        icon: <Monitor size={14} className="text-emerald-600" />,
+        bg: "bg-emerald-50/80",
+        border: "border-emerald-100",
+        indicatorColor: "bg-emerald-500",
+        hasProgress: true,
+        progressVal: typeof value === 'number' ? value : (parseInt(value as string) || 0)
+      };
+    }
+    if (clean.includes("visibility")) {
+      return {
+        icon: <Search size={14} className="text-fuchsia-600" />,
+        bg: "bg-fuchsia-50/80",
+        border: "border-fuchsia-100",
+        indicatorColor: "bg-fuchsia-500",
+        hasProgress: true,
+        progressVal: typeof value === 'number' ? value : (parseInt(value as string) || 0)
+      };
+    }
+    if (clean.includes("readiness")) {
+      return {
+        icon: <Sparkles size={14} className="text-indigo-600" />,
+        bg: "bg-indigo-50/80",
+        border: "border-indigo-100",
+        indicatorColor: "bg-indigo-500",
+        hasProgress: true,
+        progressVal: typeof value === 'number' ? value : (parseInt(value as string) || 0)
+      };
+    }
+    if (clean.includes("geo")) {
+      return {
+        icon: <Globe size={14} className="text-teal-600" />,
+        bg: "bg-teal-50/80",
+        border: "border-teal-100",
+        indicatorColor: "bg-teal-500",
+        hasProgress: true,
+        progressVal: typeof value === 'number' ? value : (parseInt(value as string) || 0)
+      };
+    }
+    return {
+      icon: <Layers size={14} className="text-slate-600" />,
+      bg: "bg-slate-50/80",
+      border: "border-slate-100",
+      indicatorColor: "bg-slate-500",
+      hasProgress: false
+    };
+  };
+
+  const style = getIconAndStyle(label);
+
   return (
-    <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm transition-all group">
-      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
-        {label}
+    <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-[0_2px_8px_rgba(241,245,249,0.5)] hover:shadow-md transition-all hover:-translate-y-0.5 duration-200 group flex flex-col justify-between relative overflow-hidden">
+      <div className="flex justify-between items-start mb-4">
+        <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase font-mono">
+          {label}
+        </span>
+        <div className={cn("p-1.5 rounded-lg border", style.bg, style.border)}>
+          {style.icon}
+        </div>
       </div>
-      <div className="flex items-baseline gap-1">
-        <div className={cn("text-2xl font-bold tracking-tight", color || "text-slate-900")}>{value}</div>
-        {sub && <div className="text-xs text-slate-400 font-medium ml-1">{sub}</div>}
+      <div className="space-y-2 mt-auto">
+        <div className="flex items-baseline gap-1">
+          <span className={cn("text-2xl font-black tracking-tight", color || "text-slate-900 font-display")}>
+            {value}
+          </span>
+          {sub && <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide ml-1">{sub}</span>}
+        </div>
+        {style.hasProgress && (
+          <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.max(0, Math.min(100, style.progressVal || 0))}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className={cn("h-full rounded-full", style.indicatorColor)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

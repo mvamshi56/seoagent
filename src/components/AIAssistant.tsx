@@ -10,7 +10,11 @@ import {
   Bot,
   Zap,
   Globe,
-  Search
+  Search,
+  Database,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { chatWithGemini } from '../services/clientAiService';
@@ -26,24 +30,30 @@ export function AIAssistant({ pages, aiProvider, setAiProvider, apiKeys }: {
   const [query, setQuery] = useState('');
   const [response, setResponse] = useState('');
   const [isAsking, setIsAsking] = useState(false);
+  const [retrievedSources, setRetrievedSources] = useState<any[]>([]);
+  const [showRAGInspector, setShowRAGInspector] = useState(false);
 
   const handleAsk = async () => {
     if (!query.trim()) return;
     setIsAsking(true);
+    setResponse('');
+    setRetrievedSources([]);
     try {
-      if (aiProvider === 'gemini') {
-        const res = await chatWithGemini(query, pages, apiKeys.gemini);
-        setResponse(res);
-      } else {
-        const res = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: aiProvider, query, pages, keys: apiKeys })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        setResponse(data.response);
-      }
+      const gKeyRaw = apiKeys.gemini || '';
+      const effectiveKeys = {
+        ...apiKeys,
+        gemini: (gKeyRaw === 'MY_GEMINI_API_KEY' || gKeyRaw === 'YOUR_GEMINI_API_KEY' ? process.env.GEMINI_API_KEY : gKeyRaw) || process.env.GEMINI_API_KEY || ''
+      };
+
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: aiProvider, query, pages, keys: effectiveKeys })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setResponse(data.response);
+      setRetrievedSources(data.sources || []);
     } catch (err: any) {
       setResponse(`Neural Link Error: ${err.message}`);
     } finally {
@@ -59,18 +69,18 @@ export function AIAssistant({ pages, aiProvider, setAiProvider, apiKeys }: {
         </div>
         
         <div className="relative z-10">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
-            <div className="space-y-1 min-w-0">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-12 border-b border-slate-100 pb-8">
+            <div className="space-y-2 shrink-0">
               <div className="flex items-center gap-3">
                  <div className="p-2 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-500/20 shrink-0">
                    <MessageSquare size={20} />
                  </div>
                  <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight lowercase">Neural SEO Query Engine</h3>
               </div>
-              <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider ml-12">Interrogate the dataset using semantic correlation</p>
+              <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider ml-12 md:ml-14">Interrogate the dataset using semantic correlation</p>
             </div>
             
-            <div className="flex flex-wrap items-center gap-2 md:gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-100 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 md:gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-150 shrink-0 self-start xl:self-auto">
                <div className="flex items-center gap-1.5 px-2 md:px-3">
                  <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-wider">Engine:</span>
                  <select 
@@ -78,7 +88,7 @@ export function AIAssistant({ pages, aiProvider, setAiProvider, apiKeys }: {
                    onChange={(e) => setAiProvider(e.target.value as any)}
                    className="bg-transparent text-[9px] md:text-[10px] font-black text-blue-600 uppercase tracking-wider outline-none cursor-pointer hover:text-blue-700"
                  >
-                   <option value="gemini">Gemini 2.0</option>
+                   <option value="gemini">Gemini 3.5</option>
                    <option value="openai">GPT-4o</option>
                    <option value="anthropic">Claude 3.5</option>
                    <option value="deepseek">DeepSeek v3</option>
@@ -190,16 +200,106 @@ export function AIAssistant({ pages, aiProvider, setAiProvider, apiKeys }: {
             </div>
           </div>
 
-          <div className="relative z-10 custom-scrollbar max-h-[600px] overflow-y-auto pr-4">
+          <div className="relative z-10 custom-scrollbar max-h-[600px] overflow-y-auto pr-4 mb-8">
              <div className="prose prose-invert prose-blue max-w-none prose-p:text-slate-300 prose-p:leading-relaxed prose-p:text-base prose-headings:text-white prose-headings:font-black prose-headings:uppercase prose-headings:tracking-tight prose-strong:text-blue-400 prose-code:text-emerald-400 prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800">
                 <ReactMarkdown>{response || ""}</ReactMarkdown>
              </div>
           </div>
 
+          {/* Advanced Hybrid RAG Engine Inspector Panel */}
+          {retrievedSources.length > 0 && (
+            <div className="relative z-10 border-t border-slate-800 pt-8 mt-8">
+              <button
+                onClick={() => setShowRAGInspector(!showRAGInspector)}
+                className="flex items-center justify-between w-full p-4 bg-slate-900 border border-slate-850 hover:border-slate-700/80 rounded-2xl transition-all group/inspector text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg group-hover/inspector:bg-indigo-600 group-hover/inspector:text-white transition-all duration-300">
+                    <Database size={16} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-200">Retrieval Service Logs</span>
+                      <span className="bg-emerald-500/10 text-emerald-400 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-emerald-500/20 uppercase tracking-widest animate-pulse">RAG Active</span>
+                    </div>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mt-0.5">
+                      Extracted {retrievedSources.length} critical domain shards out of {pages.length * 5} index points
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  {showRAGInspector ? (
+                    <ChevronUp size={16} className="text-slate-400" />
+                  ) : (
+                    <ChevronDown size={16} className="text-slate-400" />
+                  )}
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {showRAGInspector && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="overflow-hidden mt-4 space-y-3"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {retrievedSources.map((source, index) => (
+                        <div
+                          key={source.id || index}
+                          className="bg-slate-950 border border-slate-850 hover:border-slate-700 p-4 rounded-2xl transition-all space-y-3 text-slate-300 relative group/source"
+                        >
+                          <div className="flex items-start justify-between gap-2 border-b border-slate-900 pb-2">
+                            <div className="min-w-0">
+                              <span className="text-[10px] font-black text-slate-450 uppercase tracking-wide block truncate">
+                                {source.title}
+                              </span>
+                              <a
+                                href={source.url}
+                                target="_blank"
+                                referrerPolicy="no-referrer"
+                                className="text-[11px] font-bold text-blue-400 hover:underline inline-flex items-center gap-1 mt-0.5 truncate max-w-full"
+                              >
+                                {source.url}
+                                <ExternalLink size={10} className="shrink-0" />
+                              </a>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <span className={cn(
+                                "text-[9px] font-black uppercase px-2 py-0.5 rounded border tracking-wider",
+                                source.chunkType === 'issues' ? 'bg-red-550/10 text-red-400 border-red-500/20' :
+                                source.chunkType === 'headers' ? 'bg-amber-550/10 text-amber-400 border-amber-500/20' :
+                                source.chunkType === 'metrics' ? 'bg-pink-550/10 text-pink-400 border-pink-500/20' :
+                                source.chunkType === 'links' ? 'bg-blue-550/10 text-blue-400 border-blue-500/20' :
+                                source.chunkType === 'geo' ? 'bg-violet-500/10 text-violet-400 border-violet-500/20 animate-pulse' :
+                                'bg-slate-800 text-slate-300 border-slate-700'
+                              )}>
+                                {source.chunkType}
+                              </span>
+                              <span className="text-[9px] font-mono font-bold text-indigo-400">
+                                Match: {source.score}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <pre className="text-[11px] font-mono bg-slate-900 border border-slate-850/50 p-3 rounded-lg overflow-x-auto text-slate-400 max-h-[140px] leading-relaxed custom-scrollbar whitespace-pre-wrap">
+                            {source.content}
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
           <div className="mt-10 pt-8 border-t border-slate-800 flex items-center justify-between">
              <div className="flex items-center gap-3">
                 <div className="px-2 py-1 bg-slate-800 rounded text-[9px] font-black text-slate-400 tracking-wider uppercase">Encryption: TLS 1.3</div>
-                <div className="px-2 py-1 bg-slate-800 rounded text-[9px] font-black text-slate-400 tracking-wider uppercase">Protocol: JSON:API</div>
+                <div className="px-2 py-1 bg-slate-800 rounded text-[9px] font-black text-slate-400 tracking-wider uppercase">Pipeline: TF-IDF RAG v2.1</div>
              </div>
              <button 
                onClick={() => window.print()}

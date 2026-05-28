@@ -52,8 +52,8 @@ async function startServer() {
   app.post("/api/ai/chat", async (req, res) => {
     const { provider, query, pages, keys } = req.body;
     try {
-      const response = await ai.chat(provider, query, pages, keys || {});
-      res.json({ response });
+      const result = await ai.chat(provider, query, pages, keys || {});
+      res.json({ response: result.response, sources: result.sources });
     } catch (error: any) {
       console.error("AI Chat Error:", error);
       res.status(500).json({ error: error.message });
@@ -67,6 +67,17 @@ async function startServer() {
       res.json({ response });
     } catch (error: any) {
       console.error("AI GEO Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/ai/check-plagiarism", async (req, res) => {
+    const { provider, url, title, description, bodyText, keys } = req.body;
+    try {
+      const result = await ai.checkPagePlagiarism(provider, url, title, description, bodyText || "", keys || {});
+      res.json(JSON.parse(result));
+    } catch (error: any) {
+      console.error("AI Plagiarism Check Error:", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -115,7 +126,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[READY] SEO Sage Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`[READY] GEO Audit Agent Server listening on http://0.0.0.0:${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
   } catch (error) {

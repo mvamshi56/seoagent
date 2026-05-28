@@ -459,7 +459,8 @@ export function analyzeHTML(url: string, html: string, loadTime: number, headers
       keywordDensity,
       textToCodeRatio,
       imageMetrics,
-      geoScore: calculateGeoScore(pageElements, wordCount, structuredData.length > 0)
+      geoScore: calculateGeoScore(pageElements, wordCount, structuredData.length > 0),
+      bodyText
     };
 }
 
