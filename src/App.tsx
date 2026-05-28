@@ -508,7 +508,7 @@ export default function App() {
               active={activeTab === 'pages'} 
               onClick={() => setActiveTab('pages')} 
               icon={<Search size={18} />} 
-              label="Audit Data" 
+              label="Pages & AI Content" 
               collapsed={isSidebarCollapsed}
             />
             <SidebarLink 
@@ -1478,8 +1478,10 @@ export default function App() {
                 <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white overflow-hidden">
                   <div className="flex items-center gap-6">
                     <div>
-                       <h3 className="text-xl font-bold text-slate-900 tracking-tight">Audit Findings</h3>
-                       <p className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">{pages.length} Pages Indexed</p>
+                       <h3 className="text-xl font-bold text-slate-900 tracking-tight">Pages & AI Content Audit</h3>
+                       <p className="text-[11px] font-semibold text-slate-400 mt-1 uppercase tracking-wider">
+                         {pages.length} Pages Indexed • Click any page to audit Originality, Accuracy, Human Review (E-E-A-T), Tone & Hallucination Risks
+                       </p>
                     </div>
                     {compareUrls.length > 0 && (
                       <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-4 transition-all">
@@ -1557,116 +1559,121 @@ export default function App() {
                   </div>
                 )}
 
-                <div 
-                  id="audit-table-container"
-                  className="max-h-[750px] overflow-auto custom-scrollbar"
-                >
-                  <table className="w-full text-left border-collapse min-w-[1200px]">
-                    <thead className="bg-[#f8fafc] text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap sticky top-0 z-20 border-b border-slate-200 shadow-sm">
-                      <tr className="divide-x divide-slate-100">
-                        <th className="px-6 py-6 w-16 text-center bg-slate-50">SEL</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Endpoint</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Score</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">T2C Ratio</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Asset Health</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Detections</th>
-                        <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Network</th>
-                        <th className="px-8 py-6 text-right pr-10 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Controls</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                    {paginatedPages.map((page, idx) => (
-                      <tr 
-                        key={idx} 
-                        className="hover:bg-blue-50/50 transition-all duration-300 group cursor-pointer hover:shadow-[inset_4px_0_0_#2563eb]"
-                        onClick={() => setSelectedPage(page)}
-                      >
-                        <td className="px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-center">
-                            <input 
-                              type="checkbox"
-                              checked={compareUrls.includes(page.url)}
-                              onChange={() => toggleCompare(page.url)}
-                              disabled={!compareUrls.includes(page.url) && compareUrls.length >= 2}
-                              className="w-4 h-4 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
-                            />
-                          </div>
-                        </td>
-                        <td className="px-8 py-6 max-w-xl">
-                          <p className="text-xs font-medium text-slate-900 break-all line-clamp-2" title={page.url}>{page.url}</p>
-                          <p className="text-[10px] font-medium text-slate-400 mt-1 uppercase tracking-wider">{page.title || "Untitled Node"}</p>
-                        </td>
-                         <td className="px-8 py-6 text-center">
-                          {(() => {
-                            const absoluteIdx = (currentPage - 1) * pageSize + idx;
-                            const displayScore = getJitteredScore(page.url, page.score, absoluteIdx);
-
-                            return (
-                              <div className={cn(
-                                "inline-block px-3 py-1 rounded-full text-xs font-bold",
-                                displayScore >= 80 ? "bg-emerald-100 text-emerald-700" :
-                                displayScore >= 50 ? "bg-amber-100 text-amber-700" :
-                                "bg-rose-100 text-rose-700"
-                              )}>
-                                {displayScore}
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-8 py-6 text-center">
-                          <div className="text-[11px] font-black font-mono group-hover:text-blue-400">{page.textToCodeRatio}%</div>
-                          <div className="w-12 h-1 bg-slate-100 mx-auto mt-2 rounded-full overflow-hidden">
-                             <div className="h-full bg-blue-500" style={{ width: `${page.textToCodeRatio}%` }} />
-                          </div>
-                        </td>
-                        <td className="px-8 py-6 whitespace-nowrap">
-                          {page.imageMetrics ? (
-                            <div className="flex flex-col gap-1">
-                              <div className="text-[10px] font-black uppercase tracking-widest text-slate-700 group-hover:text-slate-300">
-                                {page.imageMetrics.total} Assets
-                              </div>
-                              <div className={cn(
-                                "text-[9px] font-black uppercase tracking-[0.1em]",
-                                page.imageMetrics.missingAltPercent === 0 ? "text-emerald-500 group-hover:text-emerald-400" :
-                                page.imageMetrics.missingAltPercent < 20 ? "text-amber-500 group-hover:text-amber-400" :
-                                "text-rose-500 group-hover:text-rose-400"
-                              )}>
-                                {page.imageMetrics.missingAltPercent}% Latency Risk
-                              </div>
+                <div className="p-6 bg-slate-50/50 border-t border-slate-100">
+                  <div 
+                    id="audit-table-container"
+                    className="max-h-[750px] overflow-auto custom-scrollbar border border-slate-200 bg-white rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
+                    tabIndex={0}
+                    role="region"
+                    aria-label="Audit data records table scrollable area"
+                  >
+                    <table className="w-full text-left border-collapse min-w-[1200px]">
+                      <thead className="bg-[#f8fafc] text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap sticky top-0 z-20 border-b border-slate-200 shadow-sm">
+                        <tr className="divide-x divide-slate-100">
+                          <th className="px-6 py-6 w-16 text-center bg-slate-50">SEL</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Endpoint</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Score</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">T2C Ratio</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Asset Health</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Detections</th>
+                          <th className="px-8 py-6 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500 text-center">Network</th>
+                          <th className="px-8 py-6 text-right pr-10 bg-slate-50 italic font-display lowercase tracking-tight text-sm text-slate-500">Controls</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                      {paginatedPages.map((page, idx) => (
+                        <tr 
+                          key={idx} 
+                          className="hover:bg-blue-50/50 transition-all duration-300 group cursor-pointer hover:shadow-[inset_4px_0_0_#2563eb]"
+                          onClick={() => setSelectedPage(page)}
+                        >
+                          <td className="px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center">
+                              <input 
+                                type="checkbox"
+                                checked={compareUrls.includes(page.url)}
+                                onChange={() => toggleCompare(page.url)}
+                                disabled={!compareUrls.includes(page.url) && compareUrls.length >= 2}
+                                className="w-4 h-4 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+                              />
                             </div>
-                          ) : (
-                            <span className="text-[10px] text-slate-300 italic uppercase">NA</span>
-                          )}
-                        </td>
-                        <td className="px-8 py-6 whitespace-nowrap">
-                           <div className="flex flex-wrap gap-2">
-                             {page.issues.filter(i => i.type === 'critical').length > 0 && (
-                               <span className="text-[8px] font-black text-white bg-rose-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">CRITICAL</span>
-                             )}
-                             {page.issues.filter(i => i.type === 'warning').length > 0 && (
-                               <span className="text-[8px] font-black text-white bg-amber-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">WARNING</span>
-                             )}
-                             {page.issues.length === 0 && (
-                               <span className="text-[8px] font-black text-white bg-emerald-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">VERIFIED</span>
-                             )}
-                           </div>
-                        </td>
-                        <td className="px-8 py-6 text-center" onClick={(e) => e.stopPropagation()}>
-                           <ShareButtons url={page.url} title={page.title} />
-                        </td>
-                        <td className="px-8 py-6 text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <button 
-                            onClick={() => setSelectedPage(page)}
-                            className="p-3 bg-slate-50 text-slate-400 hover:bg-blue-600 hover:text-white rounded-2xl transition-all shadow-sm active:scale-90"
-                            title="Inspect Object"
-                          >
-                            <FileText size={16} strokeWidth={2} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    </tbody>
-                  </table>
+                          </td>
+                          <td className="px-8 py-6 max-w-xl">
+                            <p className="text-xs font-medium text-slate-900 break-all line-clamp-2" title={page.url}>{page.url}</p>
+                            <p className="text-[10px] font-medium text-slate-400 mt-1 uppercase tracking-wider">{page.title || "Untitled Node"}</p>
+                          </td>
+                           <td className="px-8 py-6 text-center">
+                            {(() => {
+                              const absoluteIdx = (currentPage - 1) * pageSize + idx;
+                              const displayScore = getJitteredScore(page.url, page.score, absoluteIdx);
+  
+                              return (
+                                <div className={cn(
+                                  "inline-block px-3 py-1 rounded-full text-xs font-bold",
+                                  displayScore >= 80 ? "bg-emerald-100 text-emerald-700" :
+                                  displayScore >= 50 ? "bg-amber-100 text-amber-700" :
+                                  "bg-rose-100 text-rose-700"
+                                )}>
+                                  {displayScore}
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-8 py-6 text-center">
+                            <div className="text-[11px] font-black font-mono group-hover:text-blue-400">{page.textToCodeRatio}%</div>
+                            <div className="w-12 h-1 bg-slate-100 mx-auto mt-2 rounded-full overflow-hidden">
+                               <div className="h-full bg-blue-500" style={{ width: `${page.textToCodeRatio}%` }} />
+                            </div>
+                          </td>
+                          <td className="px-8 py-6 whitespace-nowrap">
+                            {page.imageMetrics ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-700 group-hover:text-slate-300">
+                                  {page.imageMetrics.total} Assets
+                                </div>
+                                <div className={cn(
+                                  "text-[9px] font-black uppercase tracking-[0.1em]",
+                                  page.imageMetrics.missingAltPercent === 0 ? "text-emerald-500 group-hover:text-emerald-400" :
+                                  page.imageMetrics.missingAltPercent < 20 ? "text-amber-500 group-hover:text-amber-400" :
+                                  "text-rose-500 group-hover:text-rose-400"
+                                )}>
+                                  {page.imageMetrics.missingAltPercent}% Latency Risk
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-300 italic uppercase">NA</span>
+                            )}
+                          </td>
+                          <td className="px-8 py-6 whitespace-nowrap">
+                             <div className="flex flex-wrap gap-2">
+                               {page.issues.filter(i => i.type === 'critical').length > 0 && (
+                                 <span className="text-[8px] font-black text-white bg-rose-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">CRITICAL</span>
+                               )}
+                               {page.issues.filter(i => i.type === 'warning').length > 0 && (
+                                 <span className="text-[8px] font-black text-white bg-amber-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">WARNING</span>
+                               )}
+                               {page.issues.length === 0 && (
+                                 <span className="text-[8px] font-black text-white bg-emerald-600 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm">VERIFIED</span>
+                               )}
+                             </div>
+                          </td>
+                          <td className="px-8 py-6 text-center" onClick={(e) => e.stopPropagation()}>
+                             <ShareButtons url={page.url} title={page.title} />
+                          </td>
+                          <td className="px-8 py-6 text-right pr-6" onClick={(e) => e.stopPropagation()}>
+                            <button 
+                              onClick={() => setSelectedPage(page)}
+                              className="p-3 bg-slate-50 text-slate-400 hover:bg-blue-600 hover:text-white rounded-2xl transition-all shadow-sm active:scale-90"
+                              title="Inspect Object"
+                            >
+                              <FileText size={16} strokeWidth={2} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
                 
                 {/* Pagination Controls */}
