@@ -93,6 +93,287 @@ async function startServer() {
     }
   });
 
+  // ==========================================
+  // AI SECURITY MODEL CONTEXT PROTOCOL (MCP) SERVER
+  // ==========================================
+
+  // Endpoints simulating/providing an AI Security MCP Server on HTTP/SSE transport
+  app.post("/api/mcp/v1/tools", (req, res) => {
+    res.json({
+      tools: [
+        {
+          name: "scan_prompt_injection",
+          description: "Scans prompt payload for jailbreaks, instruction overrides, or adversarial patterns. [Prompt-Injection Detection]",
+          inputSchema: {
+            type: "object",
+            properties: {
+              prompt: { type: "string", description: "The raw user prompt or content to analyze for safety boundaries." }
+            },
+            required: ["prompt"]
+          }
+        },
+        {
+          name: "verify_data_instruction_separation",
+          description: "Reviews if custom user variables are securely isolated from system schemas using delimiters (e.g. XML tags, quotes, separators). [Data / Instruction Separation]",
+          inputSchema: {
+            type: "object",
+            properties: {
+              payload: { type: "string", description: "The payload content including prompt guidelines and inputs." },
+              expectedSeparators: { type: "array", items: { type: "string" }, description: "XML/JSON wrapper tags expected to safely enclose input values." }
+            },
+            required: ["payload"]
+          }
+        },
+        {
+          name: "verify_tool_permissions",
+          description: "Evaluates standard and sensitive tools for correct permission thresholds, preventing privilege escalation. [Tool Permission Checks]",
+          inputSchema: {
+            type: "object",
+            properties: {
+              toolName: { type: "string", description: "Name of the tool being called (e.g., execute_code, readFile)." },
+              requestedScope: { type: "string", description: "Proposed context level (e.g., readOnly, sysAdmin, userSandbox)." }
+            },
+            required: ["toolName"]
+          }
+        },
+        {
+          name: "audit_human_approval_gates",
+          description: "Checks if a high-privilege action or transaction requires explicit multi-factor Human-in-The-Loop approval. [Human Approval for Sensitive Actions]",
+          inputSchema: {
+            type: "object",
+            properties: {
+              actionType: { type: "string", description: "Action being attempted (e.g., delete_database, transfer_funds, modify_system)." },
+              userRole: { type: "string", description: "The caller role (e.g., guest, moderator, admin)." }
+            },
+            required: ["actionType"]
+          }
+        },
+        {
+          name: "mask_pii_entities",
+          description: "Deep scans input texts for private credentials, email addresses, phone lines, and API/JWT keys and redacts them.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "Clear-text prompt or document corpus to mask." }
+            },
+            required: ["text"]
+          }
+        }
+      ]
+    });
+  });
+
+  app.post("/api/mcp/v1/call-tool", (req, res) => {
+    const { name, arguments: toolArgs } = req.body;
+    
+    try {
+      if (name === "scan_prompt_injection") {
+        const { prompt = "" } = toolArgs || {};
+        const adversarialRegex = /(override\s+instructions|system\s+override|disregard\s+previous|you\s+are\s+now|ignore\s+directives|dan\s+model|do\s+anything\s+now|jailbreak|ignore\s+rules|system_compromised)/gi;
+        const matches = prompt.match(adversarialRegex) || [];
+        const score = matches.length > 0 ? Math.min(40 + (matches.length * 25), 98) : 5;
+        const status = score > 50 ? "COMPROMISED" : "SECURE";
+        
+        return res.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                parameter: "Prompt-Injection Detection",
+                status,
+                riskScore: score,
+                criticalIndicatorsFound: matches.map((m: string) => m.trim()),
+                explanation: status === "COMPROMISED" 
+                  ? "VULNERABILITY CONFIRMED: Input contains adversarial override keys trying to alter core orchestrator instructions." 
+                  : "PROMPT SAFE: No malicious hijacking cues detected in prompt text."
+              }, null, 2)
+            }
+          ]
+        });
+      }
+
+      if (name === "verify_data_instruction_separation") {
+        const { payload = "", expectedSeparators = ["<UserContent>", "<UserQuery>", "<DataBlock>"] } = toolArgs || {};
+        
+        // Check if there are balanced system tags separating the structure
+        let hasSeparation = false;
+        const wrappersFound: string[] = [];
+        
+        expectedSeparators.forEach((tag: string) => {
+          const closingTag = tag.replace("<", "</");
+          if (payload.includes(tag) && payload.includes(closingTag)) {
+            hasSeparation = true;
+            wrappersFound.push(tag);
+          }
+        });
+
+        // Heuristic: if payload has instructions overrides but no boundary wrapping, it's highly unsafe!
+        const mixingHarm = /(ignore|disregard|override|instead|instead of)/gi.test(payload);
+        const score = hasSeparation ? (mixingHarm ? 35 : 10) : (mixingHarm ? 90 : 65);
+        const classification = score > 50 ? "UNSTRUCTURED_MIXING_DANGER" : "STRUCTURED_ISOLATED";
+
+        return res.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                parameter: "Data / Instruction Separation",
+                status: classification,
+                isolationScore: 100 - score,
+                activeEncapsulationFound: wrappersFound,
+                strictSeparationApplied: hasSeparation,
+                mitigationStatus: hasSeparation 
+                  ? "SECURE: Content boundaries are isolated inside sandboxed tags, limiting context overflow." 
+                  : "WARNING: High vulnerability! User input and system instructions are mixed. An attacker can escape easily."
+              }, null, 2)
+            }
+          ]
+        });
+      }
+
+      if (name === "verify_tool_permissions") {
+        const { toolName = "", requestedScope = "userSandbox" } = toolArgs || {};
+        
+        // Define dangerous tools
+        const highRiskTools = ["execute_code", "shell_exec", "run_command", "delete_database", "write_file", "modify_system"];
+        const isHighRisk = highRiskTools.includes(toolName.toLowerCase());
+        
+        const restrictedScopes = ["sysAdmin", "root", "write_access"];
+        const isSuspiciousScope = restrictedScopes.includes(requestedScope);
+
+        let allowed = true;
+        let authIndex = "SUCCESS";
+        let score = 10;
+
+        if (isHighRisk && isSuspiciousScope) {
+          allowed = false;
+          authIndex = "DENIED_PRIVILEGE_VIOLATION";
+          score = 95;
+        } else if (isHighRisk) {
+          allowed = false;
+          authIndex = "DENIED_LIMITATION";
+          score = 75;
+        } else if (isSuspiciousScope) {
+          allowed = true;
+          authIndex = "WARNING_ELEVATED";
+          score = 45;
+        }
+
+        return res.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                parameter: "Tool Permission Checks",
+                toolName,
+                requestedScope,
+                executionAllowed: allowed,
+                vulnerabilityLevel: score,
+                authStatus: authIndex,
+                details: allowed 
+                  ? `SUCCESS: Tool execution for ${toolName} holds correct permissions under scope ${requestedScope}.`
+                  : `DENIED SAFEGUARD: Blocked call tool ${toolName} under scope ${requestedScope}. Level-1 containment enforced.`
+              }, null, 2)
+            }
+          ]
+        });
+      }
+
+      if (name === "audit_human_approval_gates") {
+        const { actionType = "", userRole = "guest" } = toolArgs || {};
+        
+        const criticalActions = ["delete_database", "erase_logs", "transfer_funds", "shutdown_server", "write_critical_rules"];
+        const isCritical = criticalActions.includes(actionType.toLowerCase());
+        
+        let bypassThreat = false;
+        let approvalNeeded = false;
+
+        if (isCritical) {
+          approvalNeeded = true;
+          if (userRole === "admin") {
+            bypassThreat = false; // still requires approval
+          } else {
+            bypassThreat = true; // severe unauthorized attempt
+          }
+        }
+
+        const score = bypassThreat ? 90 : (approvalNeeded ? 40 : 10);
+        const validationState = approvalNeeded ? "PENDING_HUMAN_INTERVENTION" : "SELF_APPROVE";
+
+        return res.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                parameter: "Human Approval for Sensitive Actions",
+                actionType,
+                userRole,
+                requiresHumanInTheLoop: approvalNeeded,
+                isBypassUnauthorizedAttempt: bypassThreat,
+                threatRating: score,
+                remediationAction: approvalNeeded 
+                  ? "INTERVENTION ENFORCED: Suspended autonomous model run. Forwarding authorization dialog payload to administrator session." 
+                  : "PASS: Action classified as safe for autonomous non-interactive agent execution."
+              }, null, 2)
+            }
+          ]
+        });
+      }
+
+      if (name === "mask_pii_entities") {
+        const { text = "" } = toolArgs || {};
+        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+        const phoneRegex = /\+?\d{1,4}[-.\s]?\(?\d{1,3}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}/g;
+        const apiKeyRegex = /(sk-[a-zA-Z0-9]{32,70}|AIzaSy[a-zA-Z0-9_-]{33})/g;
+        
+        let redacted = text;
+        let emailsFound = 0;
+        let phonesFound = 0;
+        let keysFound = 0;
+
+        redacted = redacted.replace(emailRegex, () => {
+          emailsFound++;
+          return "[REDACTED_EMAIL]";
+        });
+        redacted = redacted.replace(phoneRegex, () => {
+          phonesFound++;
+          return "[REDACTED_PHONE_NUMBER]";
+        });
+        redacted = redacted.replace(apiKeyRegex, () => {
+          keysFound++;
+          return "[REDACTED_API_KEY]";
+        });
+
+        const totalRedactions = emailsFound + phonesFound + keysFound;
+
+        return res.json({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                parameter: "Data Loss Prevention (PII)",
+                originalTextLength: text.length,
+                redactedText: redacted,
+                summary: {
+                  emailsBlocked: emailsFound,
+                  phonesBlocked: phonesFound,
+                  apiKeysBlocked: keysFound,
+                  totalRedactions
+                },
+                healthRating: totalRedactions > 0 ? "PII_CONTAINED" : "CLEAN"
+              }, null, 2)
+            }
+          ]
+        });
+      }
+
+      return res.status(404).json({ error: `Tool ${name} not found.` });
+    } catch (err: any) {
+      console.error("MCP call-tool execution failed: ", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/audit/start", async (req, res) => {
     const { url, depth, maxPages } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
