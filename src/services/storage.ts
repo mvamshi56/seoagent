@@ -7,71 +7,146 @@ export async function initDB() {
   db = new Database("./seo_audit.sqlite");
   db.pragma('journal_mode = WAL');
 
+  // Verify and migrate database tables that may be present but outdated (missing userId column)
+  try {
+    const pagesInfo = db.prepare("PRAGMA table_info(pages)").all();
+    if (pagesInfo.length > 0) {
+      const hasPageUserId = pagesInfo.some((col: any) => col.name === "userId");
+      if (!hasPageUserId) {
+        console.log("Dropping outdated pages table without userId...");
+        db.exec("DROP TABLE pages;");
+      }
+    }
+  } catch (err) {
+    console.warn("Could not check or drop pages table:", err);
+  }
+
+  try {
+    const statusInfo = db.prepare("PRAGMA table_info(audit_status)").all();
+    if (statusInfo.length > 0) {
+      const hasStatusUserId = statusInfo.some((col: any) => col.name === "userId");
+      if (!hasStatusUserId) {
+        console.log("Dropping outdated audit_status table without userId...");
+        db.exec("DROP TABLE audit_status;");
+      }
+    }
+  } catch (err) {
+    console.warn("Could not check or drop audit_status table:", err);
+  }
+
   db.exec(`
-    CREATE TABLE IF NOT EXISTS pages (
-      url TEXT PRIMARY KEY,
-      data TEXT,
-      score REAL
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE,
+      password TEXT,
+      plan TEXT DEFAULT 'Free',
+      credits INTEGER DEFAULT 100,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS pages (
+      userId TEXT,
+      url TEXT,
+      data TEXT,
+      score REAL,
+      PRIMARY KEY (userId, url)
+    );
+
     CREATE TABLE IF NOT EXISTS audit_status (
-      id INTEGER PRIMARY KEY,
+      userId TEXT PRIMARY KEY,
       is_running BOOLEAN,
       progress INTEGER,
       current_url TEXT,
-      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+      has_robots BOOLEAN DEFAULT 0,
+      has_sitemap BOOLEAN DEFAULT 0
     );
   `);
 
-  // Schema migrations
-  const tableInfo = db.prepare("PRAGMA table_info(audit_status)").all();
-  const columns = tableInfo.map((c: any) => c.name);
-  if (!columns.includes("has_robots")) {
-    db.prepare("ALTER TABLE audit_status ADD COLUMN has_robots BOOLEAN DEFAULT 0").run();
-  }
-  if (!columns.includes("has_sitemap")) {
-    db.prepare("ALTER TABLE audit_status ADD COLUMN has_sitemap BOOLEAN DEFAULT 0").run();
-  }
-
-  const status = db.prepare("SELECT * FROM audit_status WHERE id = 1").get();
-  if (!status) {
-    db.prepare("INSERT INTO audit_status (id, is_running, progress, current_url, has_robots, has_sitemap) VALUES (1, 0, 0, '', 0, 0)").run();
+  // Seed default admin account
+  try {
+    db.prepare("INSERT OR IGNORE INTO users (id, email, password, plan, credits) VALUES (?, ?, ?, ?, ?)")
+      .run("admin", "admin@saas.com", "password123", "Pro", 500);
+  } catch (err) {
+    console.warn("Could not seed default user:", err);
   }
 }
 
-export async function savePage(page: SEOPage) {
-  db.prepare("INSERT OR REPLACE INTO pages (url, data, score) VALUES (?, ?, ?)")
-    .run(page.url, JSON.stringify(page), page.score);
+export async function createUser(id: string, email: string, passwordHash: string, plan: string = "Free") {
+  db.prepare("INSERT INTO users (id, email, password, plan, credits) VALUES (?, ?, ?, ?, ?)")
+    .run(id, email.toLowerCase().trim(), passwordHash, plan, plan === "Enterprise" ? 2000 : plan === "Pro" ? 500 : 100);
 }
 
-export async function getPages(): Promise<SEOPage[]> {
-  const rows = db.prepare("SELECT data FROM pages").all();
+export async function getUser(id: string) {
+  return db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+}
+
+export async function getUserByEmail(email: string) {
+  return db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase().trim());
+}
+
+export async function updateUserPlan(id: string, plan: string) {
+  const credits = plan === "Enterprise" ? 2000 : plan === "Pro" ? 500 : 100;
+  db.prepare("UPDATE users SET plan = ?, credits = ? WHERE id = ?").run(plan, credits, id);
+}
+
+export async function deductCredits(id: string, amount: number) {
+  db.prepare("UPDATE users SET credits = MAX(0, credits - ?) WHERE id = ?").run(amount, id);
+}
+
+export async function savePage(userId: string, page: SEOPage) {
+  db.prepare("INSERT OR REPLACE INTO pages (userId, url, data, score) VALUES (?, ?, ?, ?)")
+    .run(userId, page.url, JSON.stringify(page), page.score);
+}
+
+export async function getPages(userId: string): Promise<SEOPage[]> {
+  const rows = db.prepare("SELECT data FROM pages WHERE userId = ?").all(userId);
   return rows.map((r: any) => JSON.parse(r.data));
 }
 
-export async function updateStatus(isRunning: boolean, progress: number, currentUrl: string, hasRobots?: boolean, hasSitemap?: boolean) {
-  const updates = ["is_running = ?", "progress = ?", "current_url = ?", "last_updated = CURRENT_TIMESTAMP"];
-  const params: any[] = [isRunning ? 1 : 0, progress, currentUrl];
+export async function updateStatus(userId: string, isRunning: boolean, progress: number, currentUrl: string, hasRobots?: boolean, hasSitemap?: boolean) {
+  const status = db.prepare("SELECT * FROM audit_status WHERE userId = ?").get(userId);
+  if (!status) {
+    db.prepare("INSERT INTO audit_status (userId, is_running, progress, current_url, has_robots, has_sitemap) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(userId, isRunning ? 1 : 0, progress, currentUrl, hasRobots ? 1 : 0, hasSitemap ? 1 : 0);
+  } else {
+    const updates = ["is_running = ?", "progress = ?", "current_url = ?", "last_updated = CURRENT_TIMESTAMP"];
+    const params: any[] = [isRunning ? 1 : 0, progress, currentUrl];
 
-  if (hasRobots !== undefined) {
-    updates.push("has_robots = ?");
-    params.push(hasRobots ? 1 : 0);
-  }
-  if (hasSitemap !== undefined) {
-    updates.push("has_sitemap = ?");
-    params.push(hasSitemap ? 1 : 0);
-  }
+    if (hasRobots !== undefined) {
+      updates.push("has_robots = ?");
+      params.push(hasRobots ? 1 : 0);
+    }
+    if (hasSitemap !== undefined) {
+      updates.push("has_sitemap = ?");
+      params.push(hasSitemap ? 1 : 0);
+    }
 
-  const query = `UPDATE audit_status SET ${updates.join(", ")} WHERE id = 1`;
-  db.prepare(query).run(...params);
+    const query = `UPDATE audit_status SET ${updates.join(", ")} WHERE userId = ?`;
+    params.push(userId);
+    db.prepare(query).run(...params);
+  }
 }
 
-export async function getAuditStatus() {
-  return db.prepare("SELECT * FROM audit_status WHERE id = 1").get();
+export async function getAuditStatus(userId: string) {
+  const status = db.prepare("SELECT * FROM audit_status WHERE userId = ?").get(userId);
+  if (!status) {
+    return {
+      userId,
+      is_running: 0,
+      progress: 0,
+      current_url: "",
+      has_robots: 0,
+      has_sitemap: 0,
+      last_updated: null
+    };
+  }
+  return status;
 }
 
-export async function getStats() {
-  const pages = await getPages();
-  const status = await getAuditStatus();
+export async function getStats(userId: string) {
+  const pages = await getPages(userId);
+  const status = await getAuditStatus(userId);
   const criticalIssues = pages.reduce((acc, p) => acc + p.issues.filter(i => i.type === "critical").length, 0);
   const warningIssues = pages.reduce((acc, p) => acc + p.issues.filter(i => i.type === "warning").length, 0);
   const totalLinks = pages.reduce((acc, p) => acc + (p.links.internal.length + p.links.external.length), 0);
@@ -259,7 +334,7 @@ function calculateAiRecognitionScore(pages: SEOPage[]) {
   return Math.min(100, Math.round(avgGeo + visibilityBonus));
 }
 
-export async function resetData() {
-  db.prepare("DELETE FROM pages").run();
-  await updateStatus(false, 0, "", false, false);
+export async function resetData(userId: string) {
+  db.prepare("DELETE FROM pages WHERE userId = ?").run(userId);
+  await updateStatus(userId, false, 0, "", false, false);
 }

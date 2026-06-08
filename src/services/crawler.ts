@@ -9,19 +9,19 @@ import * as db from "./storage.js";
 chromium.use(StealthPlugin());
 
 const userAgents = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
 ];
 
 interface AuditConfig {
   depth: number;
   maxPages: number;
+  userId?: string;
 }
 
 export async function audit(startUrl: string, config: AuditConfig) {
-  const { depth, maxPages } = config;
+  const { depth, maxPages, userId = "public" } = config;
   const visited = new Set<string>();
 
   let startUrlNormalized = startUrl.trim().replace(/\/$/, "").toLowerCase();
@@ -38,8 +38,8 @@ export async function audit(startUrl: string, config: AuditConfig) {
     { url: startUrlNormalized, currentDepth: 0 },
   ];
 
-  await db.resetData();
-  await db.updateStatus(true, 0, startUrlNormalized);
+  await db.resetData(userId);
+  await db.updateStatus(userId, true, 0, startUrlNormalized);
 
   // Check robots.txt and sitemap
   let hasRobots = false;
@@ -158,7 +158,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
   } catch (e) {
     console.error("Meta checks failed", e);
   }
-  await db.updateStatus(true, 0, startUrlNormalized, hasRobots, hasSitemap);
+  await db.updateStatus(userId, true, 0, startUrlNormalized, hasRobots, hasSitemap);
 
   let processedCount = 0;
   let startedCount = 0;
@@ -176,6 +176,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
       Math.round((processedCount / maxPages) * 100),
     );
     db.updateStatus(
+      userId,
       true,
       progress,
       `Audit [${startedCount}/${maxPages}]: ${url}`,
@@ -193,11 +194,17 @@ export async function audit(startUrl: string, config: AuditConfig) {
 
         const response = await fetch(url, {
           headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": "\"Windows\"",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1"
           },
           signal: controller.signal,
           redirect: "follow",
@@ -332,6 +339,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
 
                 if (isBlocked) {
                   db.updateStatus(
+                    userId,
                     true,
                     progress,
                     `Bypassing Cloudflare Challenge: ${url}`,
@@ -390,7 +398,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
       const loadTime = Date.now() - startTime;
       const pageData = analyzeHTML(finalUrl, htmlContent, loadTime, headersMap);
 
-      await db.savePage(pageData);
+      await db.savePage(userId, pageData);
 
       if (currentDepth < depth) {
         pageData.links.internal.forEach((link) => {
@@ -411,15 +419,15 @@ export async function audit(startUrl: string, config: AuditConfig) {
     } else {
       console.log(`Saving fallback restricted page for ${url}`);
       try {
-        await db.savePage({
+        await db.savePage(userId, {
           url,
-          title: "Crawl Restricted / Blocked",
-          description: `Content for ${url} could not be fully analyzed. This site may be using advanced bot protection or client-side rendering that requires more time.`,
-          statusCode: 0,
+          title: "Crawl Blocked by Bot Protection",
+          description: `The content for ${url} could not be retrieved. This website is actively using anti-bot protection (like Cloudflare, Datadome, or a WAF) which blocked our automated crawler from accessing its internal links. Because we could not bypass the security challenge, the crawl stopped at 1 node with a score of 0.`,
+          statusCode: 403,
           issues: [
             {
               type: "critical",
-              message: "Page content could not be retrieved (Blocked or Timeout)",
+              message: "Website strictly blocks automated bots. Please try testing a different URL that allows standard bots.",
               category: "technical",
             },
           ],
@@ -438,8 +446,8 @@ export async function audit(startUrl: string, config: AuditConfig) {
           performance: { performanceScore: 0, fcp: 0, lcp: 0, cls: 0, tbt: 0 },
           imageMetrics: {
             total: 0,
-            missingAlt: 0,
-            missingAltPercent: 0,
+            missingAlt: 1,
+            missingAltPercent: 100,
             genericAlt: 0,
           },
         } as any);
@@ -485,6 +493,6 @@ export async function audit(startUrl: string, config: AuditConfig) {
     console.error("Audit error:", error);
   } finally {
     if (browser) await browser.close().catch(() => {});
-    await db.updateStatus(false, 100, "Completed");
+    await db.updateStatus(userId, false, 100, "Completed");
   }
 }

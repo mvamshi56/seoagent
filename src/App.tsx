@@ -54,6 +54,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SaaSPortal, SaaSUser } from './components/SaaSPortal';
 import { 
   BarChart, 
   Bar, 
@@ -168,6 +169,21 @@ export default function App() {
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'groq' | 'huggingface' | 'deepseek' | 'perplexity'>('gemini');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [currentUser, setCurrentUser] = useState<SaaSUser>(() => ({
+    loggedIn: false,
+    userId: localStorage.getItem('saas_userId') || 'public',
+    plan: 'Free',
+    credits: 0
+  }));
+
+  const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      'x-user-id': currentUser.userId,
+    };
+    return fetch(endpoint, { ...options, headers });
+  };
+
   const [apiKeys, setApiKeys] = useState(() => {
     try {
       const saved = localStorage.getItem('seo_api_keys');
@@ -268,39 +284,40 @@ export default function App() {
   }, [paginatedPages, activeTab]);
 
   useEffect(() => {
-    const checkInitialStatus = async () => {
+    const syncUserWorkspace = async () => {
       try {
-        const res = await fetch('/api/audit/status');
+        const res = await apiFetch('/api/audit/status');
         const data = await res.json();
         
         if (data.is_running) {
           setIsAuditing(true);
           setProgress(data.progress);
           setCurrentCrawlingUrl(data.current_url);
-        } else if (data.last_updated) {
-          // If not running, check if there are results
-          // SQLite CURRENT_TIMESTAMP is UTC, so we append Z for proper parsing
-          const timestampStr = data.last_updated.replace(' ', 'T') + 'Z';
-          setAuditEndTime(new Date(timestampStr).getTime());
-          const resultsRes = await fetch('/api/audit/results');
+        } else {
+          setIsAuditing(false);
+          setProgress(0);
+          const resultsRes = await apiFetch('/api/audit/results');
           const resultsData = await resultsRes.json();
           if (resultsData.stats && resultsData.pages.length > 0) {
             setPages(resultsData.pages);
             setStats(resultsData.stats);
+          } else {
+            setPages([]);
+            setStats(null);
           }
         }
-      } catch (error) {
-        console.error("Failed to fetch initial status:", error);
+      } catch (err) {
+        console.error("Failed to sync workspace:", err);
       }
     };
-    checkInitialStatus();
-  }, []);
+    syncUserWorkspace();
+  }, [currentUser.userId]);
 
   useEffect(() => {
     const timer = setInterval(async () => {
       if (isAuditing) {
         try {
-          const res = await fetch('/api/audit/status');
+          const res = await apiFetch('/api/audit/status');
           if (!res.ok) throw new Error("Status Fetch Failed");
           const data = await res.json();
           setProgress(data.progress);
@@ -315,13 +332,13 @@ export default function App() {
       }
     }, 2000);
     return () => clearInterval(timer);
-  }, [isAuditing]);
+  }, [isAuditing, currentUser.userId]);
 
   const [isScanningPlagiarism, setIsScanningPlagiarism] = useState(false);
   const handleCheckPlagiarism = async (pageUrl: string) => {
     setIsScanningPlagiarism(true);
     try {
-      const res = await fetch("/api/ai/check-plagiarism", {
+      const res = await apiFetch("/api/ai/check-plagiarism", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -371,21 +388,25 @@ export default function App() {
     setAuditEndTime(null);
     setCurrentCrawlingUrl(targetUrl);
     try {
-      const res = await fetch('/api/audit/start', {
+      const res = await apiFetch('/api/audit/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: targetUrl, depth, maxPages })
       });
-      if (!res.ok) throw new Error(`Audit Start Error: ${res.status}`);
-    } catch (err) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Audit Start Error: ${res.status}`);
+      }
+    } catch (err: any) {
       console.error("Failed to start audit", err);
+      alert(err.message || "Crawl launch failed.");
       setIsAuditing(false);
     }
   };
 
   const fetchResults = async () => {
     try {
-      const res = await fetch('/api/audit/results');
+      const res = await apiFetch('/api/audit/results');
       if (!res.ok) throw new Error("Results Fetch Failed");
       const data = await res.json();
       setPages(data.pages);
@@ -441,7 +462,7 @@ export default function App() {
           gemini: (gKeyRaw === 'MY_GEMINI_API_KEY' || gKeyRaw === 'YOUR_GEMINI_API_KEY' ? process.env.GEMINI_API_KEY : gKeyRaw) || process.env.GEMINI_API_KEY || ''
         };
 
-        const res = await fetch('/api/ai/insights', {
+        const res = await apiFetch('/api/ai/insights', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -510,7 +531,7 @@ export default function App() {
 
   const resetData = async () => {
     try {
-      await fetch('/api/audit/reset', { method: 'POST' });
+      await apiFetch('/api/audit/reset', { method: 'POST' });
       setPages([]);
       setStats(null);
       setAiInsight(null);
@@ -703,7 +724,7 @@ export default function App() {
       <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
         {/* Header - Advanced Command Deck */}
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-6 lg:px-10 shrink-0 z-40 sticky top-0 shadow-sm transition-all duration-300">
-          <div className="flex items-center gap-6">
+          <div className="hidden lg:flex items-center gap-6">
             <div className="flex items-center gap-3">
               {url ? (
                 <div className="hidden xl:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-200 rounded-lg max-w-md">
@@ -796,6 +817,7 @@ export default function App() {
                  </div>
               </div>
             )}
+            <SaaSPortal currentUser={currentUser} onUserUpdate={setCurrentUser} />
             <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
               <Download size={18} />
             </button>

@@ -2,13 +2,9 @@ import fs from "fs";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { fileURLToPath } from "url";
 import * as crawler from "./src/services/crawler.js";
 import * as db from "./src/services/storage.js";
 import * as ai from "./src/services/aiProviderService.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 console.log("Starting server process...");
 
@@ -374,30 +370,138 @@ async function startServer() {
     }
   });
 
+  // ==========================================
+  // SAAS AUTHENTICATION & PORTAL API
+  // ==========================================
+  app.post("/api/auth/signup", async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    try {
+      const existingUser = await db.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+      const userId = "usr_" + Math.random().toString(36).substring(2, 11);
+      await db.createUser(userId, email, password, "Free");
+      const user = await db.getUser(userId);
+      res.json({ success: true, userId, email, plan: user.plan, credits: user.credits });
+    } catch (err: any) {
+      console.error("Signup error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    try {
+      const user = await db.getUserByEmail(email);
+      if (!user || user.password !== password) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+      res.json({ success: true, userId: user.id, email: user.email, plan: user.plan, credits: user.credits });
+    } catch (err: any) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    try {
+      const user = await db.getUser(userId);
+      if (!user) {
+        return res.json({ loggedIn: false, userId: 'public', plan: 'Free', credits: 0 });
+      }
+      res.json({ loggedIn: true, userId: user.id, email: user.email, plan: user.plan, credits: user.credits });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/upgrade", async (req, res) => {
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    const { plan } = req.body;
+    try {
+      await db.updateUserPlan(userId, plan);
+      const user = await db.getUser(userId);
+      res.json({ success: true, plan: user.plan, credits: user.credits });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/audit/start", async (req, res) => {
-    const { url, depth, maxPages } = req.body;
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    let { url, depth, maxPages } = req.body;
+    depth = Number(depth) || 10;
+    maxPages = Number(maxPages) || 1000;
     if (!url) return res.status(400).json({ error: "URL is required" });
 
-    // Start background crawl
-    crawler.audit(url, { depth, maxPages }).catch(console.error);
-    
-    res.json({ message: "Audit started", url });
+    try {
+      const user = await db.getUser(userId);
+      if (user) {
+        if (user.credits <= 0) {
+          return res.status(403).json({ error: "Insufficient crawl credits. Please upgrade your plan." });
+        }
+        if (user.plan === "Free") {
+          maxPages = Math.min(20, maxPages);
+          depth = Math.min(2, depth);
+        } else if (user.plan === "Pro") {
+          maxPages = Math.min(150, maxPages);
+        }
+        // Deduct 1 audit credit for launch
+        await db.deductCredits(userId, 1);
+      } else {
+        // Public/Guest Limits
+        maxPages = Math.min(5, maxPages);
+        depth = Math.min(1, depth);
+      }
+
+      // Start background crawl
+      crawler.audit(url, { depth, maxPages, userId }).catch(console.error);
+      res.json({ message: "Audit started", url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/audit/status", async (req, res) => {
-    const status = await db.getAuditStatus();
-    res.json(status);
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    try {
+      const status = await db.getAuditStatus(userId);
+      res.json(status);
+    } catch (err: any) {
+      console.error("Status fetch error:", err);
+      res.status(500).json({ error: err.message || "Failed to retrieve status" });
+    }
   });
 
   app.get("/api/audit/results", async (req, res) => {
-    const pages = await db.getPages();
-    const stats = await db.getStats();
-    res.json({ pages, stats });
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    try {
+      const pages = await db.getPages(userId);
+      const stats = await db.getStats(userId);
+      res.json({ pages, stats });
+    } catch (err: any) {
+      console.error("Results fetch error:", err);
+      res.status(500).json({ error: err.message || "Failed to retrieve results" });
+    }
   });
 
   app.post("/api/audit/reset", async (req, res) => {
-    await db.resetData();
-    res.json({ message: "Data reset" });
+    const userId = (req.headers["x-user-id"] as string) || "public";
+    try {
+      await db.resetData(userId);
+      res.json({ message: "Data reset" });
+    } catch (err: any) {
+      console.error("Reset error:", err);
+      res.status(500).json({ error: err.message || "Failed to reset data" });
+    }
   });
 
   // Vite middleware for development
