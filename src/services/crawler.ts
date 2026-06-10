@@ -185,12 +185,13 @@ export async function audit(startUrl: string, config: AuditConfig) {
     let htmlContent = "";
     let finalUrl = url;
     let headersMap: Record<string, string> = {};
+    let lastErrorMessage = "";
 
     try {
       // Try fetch first (Fast)
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const response = await fetch(url, {
           headers: {
@@ -235,10 +236,12 @@ export async function audit(startUrl: string, config: AuditConfig) {
             visited.add(finalUrlKey.replace(/^https?:\/\/(www\.)?/, ""));
             const originalUrlKey = url.replace(/\/$/, "").toLowerCase();
             visited.add(originalUrlKey);
+          } else if (looksLikeABlock) {
+            lastErrorMessage = "Fetch returned Cloudflare or Bot Challenge block page";
           }
         }
       } catch (e: any) {
-        // Silent as we have fallback
+        lastErrorMessage = e.message || "Fetch failed";
       }
 
       // Fallback to Playwright if fetch failed or returned invalid content
@@ -327,8 +330,11 @@ export async function audit(startUrl: string, config: AuditConfig) {
 
               try {
                 let resp = await page
-                  .goto(url, { waitUntil: "domcontentloaded", timeout: 8000 })
-                  .catch(() => null);
+                  .goto(url, { waitUntil: "domcontentloaded", timeout: 15000 })
+                  .catch((err) => {
+                    lastErrorMessage = err.message || "Playwright goto failed";
+                    return null;
+                  });
                 
                 // Cloudflare Bypass Attempt
                 const title = await page.title().catch(() => "");
@@ -355,12 +361,15 @@ export async function audit(startUrl: string, config: AuditConfig) {
                   await page.waitForTimeout(2000);
                 } else if (isRoot) {
                   // Only add landing warmup/scroll for the root page
-                  await page.waitForTimeout(400);
+                  await page.waitForTimeout(1000);
                   await page
                     .evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2))
                     .catch(() => {});
-                  await page.waitForTimeout(100);
+                  await page.waitForTimeout(500);
                   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+                } else {
+                  // Let SPAs render links on deeper pages too
+                  await page.waitForTimeout(1000);
                 }
 
                 finalUrl = page.url();
@@ -378,6 +387,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
                   `Playwright fallback failed for ${url}:`,
                   pwErr.message,
                 );
+                lastErrorMessage = pwErr.message || "Playwright headless crash or error";
               } finally {
                 await page?.close().catch(() => {});
                 await context?.close().catch(() => {});
@@ -389,6 +399,7 @@ export async function audit(startUrl: string, config: AuditConfig) {
         }
     } catch (e: any) {
       console.error(`Outer crawl logic failed for ${url}:`, e.message);
+      lastErrorMessage = e.message || "Unknown crawl error";
     }
 
     // ALWAYS increment and save result (success or failure) to avoid UI getting stuck
@@ -418,17 +429,40 @@ export async function audit(startUrl: string, config: AuditConfig) {
       }
     } else {
       console.log(`Saving fallback restricted page for ${url}`);
+      
+      const isConnectionError = 
+        lastErrorMessage.toLowerCase().includes("dns") ||
+        lastErrorMessage.toLowerCase().includes("enotfound") ||
+        lastErrorMessage.toLowerCase().includes("econnrefused") ||
+        lastErrorMessage.toLowerCase().includes("name_not_resolved") ||
+        lastErrorMessage.toLowerCase().includes("address") ||
+        lastErrorMessage.toLowerCase().includes("timeout") ||
+        lastErrorMessage.toLowerCase().includes("reach") ||
+        lastErrorMessage.toLowerCase().includes("protocol") ||
+        lastErrorMessage.toLowerCase().includes("cannot find") ||
+        lastErrorMessage.toLowerCase().includes("empty");
+
+      const title = isConnectionError ? "Failed to Connect to Website" : "Crawl Blocked by Bot Protection";
+      const description = isConnectionError 
+        ? `The page at ${url} could not be reached. Connection status details: ${lastErrorMessage}. Please verify that the URL is spelled correctly, the website is online, and it is accessible from the public internet.`
+        : `The content for ${url} could not be retrieved. This website is actively using anti-bot protection (like Cloudflare, Datadome, or a WAF) which blocked or challenged our automated crawler. Because we could not bypass the challenge, the crawl stopped here with a score of 0.`;
+      
+      const category = "technical";
+      const issueMsg = isConnectionError 
+        ? `Network Connection Error: ${lastErrorMessage}. Verify the domain is valid and live.`
+        : "Website strictly blocks automated bots. Please try testing a different URL that allows standard bots.";
+
       try {
         await db.savePage(userId, {
           url,
-          title: "Crawl Blocked by Bot Protection",
-          description: `The content for ${url} could not be retrieved. This website is actively using anti-bot protection (like Cloudflare, Datadome, or a WAF) which blocked our automated crawler from accessing its internal links. Because we could not bypass the security challenge, the crawl stopped at 1 node with a score of 0.`,
-          statusCode: 403,
+          title,
+          description,
+          statusCode: isConnectionError ? 504 : 403,
           issues: [
             {
               type: "critical",
-              message: "Website strictly blocks automated bots. Please try testing a different URL that allows standard bots.",
-              category: "technical",
+              message: issueMsg,
+              category,
             },
           ],
           links: { internal: [], external: [] },

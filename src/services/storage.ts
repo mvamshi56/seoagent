@@ -6,6 +6,7 @@ let db: any = null;
 export async function initDB() {
   db = new Database("./seo_audit.sqlite");
   db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 10000');
 
   // Verify and migrate database tables that may be present but outdated (missing userId column)
   try {

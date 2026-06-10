@@ -443,24 +443,9 @@ async function startServer() {
     if (!url) return res.status(400).json({ error: "URL is required" });
 
     try {
-      const user = await db.getUser(userId);
-      if (user) {
-        if (user.credits <= 0) {
-          return res.status(403).json({ error: "Insufficient crawl credits. Please upgrade your plan." });
-        }
-        if (user.plan === "Free") {
-          maxPages = Math.min(20, maxPages);
-          depth = Math.min(2, depth);
-        } else if (user.plan === "Pro") {
-          maxPages = Math.min(150, maxPages);
-        }
-        // Deduct 1 audit credit for launch
-        await db.deductCredits(userId, 1);
-      } else {
-        // Public/Guest Limits
-        maxPages = Math.min(5, maxPages);
-        depth = Math.min(1, depth);
-      }
+      // Safe maximum boundaries for crawling performance
+      maxPages = Math.min(1000, maxPages);
+      depth = Math.min(10, depth);
 
       // Start background crawl
       crawler.audit(url, { depth, maxPages, userId }).catch(console.error);

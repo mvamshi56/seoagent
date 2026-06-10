@@ -54,7 +54,9 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SaaSPortal, SaaSUser } from './components/SaaSPortal';
+interface SaaSUser {
+  userId: string;
+}
 import { 
   BarChart, 
   Bar, 
@@ -169,12 +171,14 @@ export default function App() {
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'groq' | 'huggingface' | 'deepseek' | 'perplexity'>('gemini');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [currentUser, setCurrentUser] = useState<SaaSUser>(() => ({
-    loggedIn: false,
-    userId: localStorage.getItem('saas_userId') || 'public',
-    plan: 'Free',
-    credits: 0
-  }));
+  const [currentUser] = useState<SaaSUser>(() => {
+    let uid = localStorage.getItem('saas_userId');
+    if (!uid || uid === 'public') {
+      uid = 'usr_' + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem('saas_userId', uid);
+    }
+    return { userId: uid };
+  });
 
   const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
     const headers = {
@@ -817,7 +821,6 @@ export default function App() {
                  </div>
               </div>
             )}
-            <SaaSPortal currentUser={currentUser} onUserUpdate={setCurrentUser} />
             <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
               <Download size={18} />
             </button>
